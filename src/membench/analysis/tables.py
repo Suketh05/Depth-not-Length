@@ -1,0 +1,180 @@
+"""Scored-result aggregation and the benchmark's output tables.
+
+Turns the runner's raw :class:`~membench.agents.runner.AttemptRecord` rows into
+scored rows (joining compliance / retrieval / correctness), then aggregates them
+into the headline tables -- all plain group-by-means over one row shape, no bespoke
+per-table logic:
+
+* **headline** -- model fixed (Claude), rows = arms, per dataset (compliance).
+* **depth crossover** -- rows = arms, cols = depth, cells = full-chain recovery,
+  on the spec-strippable datasets.
+* **robustness** -- arm fixed (the graph arm), rows = models, per dataset.
+* **ablation** -- the four-arm ablation cells.
+* **competitor matrix** -- measured (Tier-1) arms in one block; the cited
+  vendor-reported (Tier-2) claims kept in a separate, labelled block (the
+  ``assert_single_tier`` guard forbids mixing them).
+"""
+
+from __future__ import annotations
+
+import statistics
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+
+from membench.agents.runner import AttemptRecord
+from membench.competitors import ProvenanceTier, VendorClaim, assert_single_tier
+from membench.metrics.compliance import score_compliance
+from membench.metrics.correctness import score_correctness
+from membench.metrics.retrieval import score_retrieval
+from membench.types import Task
+
+__all__ = [
+    "ScoredRow",
+    "TwoTierMatrix",
+    "ablation_table",
+    "competitor_matrix",
+    "depth_crossover_table",
+    "headline_table",
+    "robustness_table",
+    "score_records",
+]
+
+_CLAUDE_PREFIX = "claude"
+_STRIPPABLE = ("dcbench", "swebench", "synthetic")
+
+
+@dataclass(frozen=True, slots=True)
+class ScoredRow:
+    """One attempt with its scored metrics -- the canonical analysis row."""
+
+    dataset: str
+    arm: str
+    model: str
+    depth: int
+    spec_variant: str
+    compliance_rate: float
+    chain_recovered: bool
+    recall: float
+    precision: float
+    correct: bool
+    total_tokens: int
+    dollars: float
+
+
+def score_records(
+    records: Iterable[AttemptRecord], tasks_by_id: Mapping[str, Task]
+) -> list[ScoredRow]:
+    """Join compliance / retrieval / correctness onto raw attempt records."""
+    rows: list[ScoredRow] = []
+    for rec in records:
+        task = tasks_by_id[rec.task_id]
+        compliance = score_compliance(rec.response_text, rec.governing_decisions, task.corpus_by_id)
+        retrieval = score_retrieval(rec.retrieved_ids, rec.governing_decisions)
+        if task.is_coding:
+            correct = score_correctness(rec.response_text, compliance).merge_ready
+        else:
+            correct = compliance.rate == 1.0
+        rows.append(
+            ScoredRow(
+                dataset=rec.dataset,
+                arm=rec.arm,
+                model=rec.model,
+                depth=rec.depth,
+                spec_variant=rec.spec_variant,
+                compliance_rate=compliance.rate,
+                chain_recovered=retrieval.chain_recovered,
+                recall=retrieval.recall,
+                precision=retrieval.precision,
+                correct=correct,
+                total_tokens=rec.input_tokens + rec.output_tokens,
+                dollars=rec.dollars,
+            )
+        )
+    return rows
+
+
+def _groupby_mean(
+    rows: Sequence[ScoredRow], key: tuple[str, ...], value: str
+) -> dict[tuple[object, ...], float]:
+    groups: dict[tuple[object, ...], list[float]] = {}
+    for row in rows:
+        k = tuple(getattr(row, field) for field in key)
+        groups.setdefault(k, []).append(float(getattr(row, value)))
+    return {k: statistics.mean(v) for k, v in groups.items()}
+
+
+def headline_table(rows: Sequence[ScoredRow]) -> dict[tuple[object, ...], float]:
+    """Mean compliance per (dataset, arm) for the Claude model line."""
+    claude = [r for r in rows if r.model.startswith(_CLAUDE_PREFIX)]
+    return _groupby_mean(claude, ("dataset", "arm"), "compliance_rate")
+
+
+def depth_crossover_table(rows: Sequence[ScoredRow]) -> dict[tuple[object, ...], float]:
+    """Mean full-chain recovery per (arm, depth) on the spec-strippable datasets."""
+    filtered = [r for r in rows if r.dataset in _STRIPPABLE and r.model.startswith(_CLAUDE_PREFIX)]
+    return _groupby_mean(filtered, ("arm", "depth"), "chain_recovered")
+
+
+def robustness_table(
+    rows: Sequence[ScoredRow], graph_arm: str = "brief_graph"
+) -> dict[tuple[object, ...], float]:
+    """Mean compliance per (dataset, model) with the memory arm fixed to the graph arm."""
+    filtered = [r for r in rows if r.arm == graph_arm]
+    return _groupby_mean(filtered, ("dataset", "model"), "compliance_rate")
+
+
+def ablation_table(
+    rows: Sequence[ScoredRow],
+    cells: Mapping[tuple[str, int], str] | None = None,
+) -> dict[str, float]:
+    """Relabel specific (arm, depth) cells into the four-arm ablation."""
+    cells = cells or {
+        ("none", 1): "full_spec/none",
+        ("none", 3): "stripped/none",
+        ("brief_graph", 3): "stripped/brief",
+        ("random_context", 3): "stripped/random",
+    }
+    grouped: dict[str, list[float]] = {}
+    for r in rows:
+        if r.dataset not in _STRIPPABLE or not r.model.startswith(_CLAUDE_PREFIX):
+            continue
+        label = cells.get((r.arm, r.depth))
+        if label is not None:
+            grouped.setdefault(label, []).append(r.compliance_rate)
+    return {label: statistics.mean(values) for label, values in grouped.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class TwoTierMatrix:
+    """Measured (Tier-1) and vendor-reported (Tier-2) results, kept separate."""
+
+    measured: dict[str, float]  # arm -> measured compliance
+    measured_tier: ProvenanceTier
+    vendor_reported: list[VendorClaim]
+    vendor_tier: ProvenanceTier
+
+
+def competitor_matrix(
+    rows: Sequence[ScoredRow], vendor_claims: Sequence[VendorClaim]
+) -> TwoTierMatrix:
+    """Build the two-tier competitor matrix; the tiers are never merged.
+
+    Measured arms (one block) and vendor-reported claims (a separate, cited block)
+    are returned distinctly; :func:`assert_single_tier` enforces that each block is a
+    single provenance tier.
+    """
+    measured = _groupby_mean(rows, ("arm",), "compliance_rate")
+    measured_by_arm = {str(arm[0]): value for arm, value in measured.items()}
+    # Guard: the measured block is uniformly Tier-1 and vendor block uniformly Tier-2.
+    measured_tier = assert_single_tier([ProvenanceTier.MEASURED] * max(len(measured_by_arm), 1))
+    vendor_tier = (
+        assert_single_tier([c.tier for c in vendor_claims])
+        if vendor_claims
+        else (ProvenanceTier.VENDOR_REPORTED)
+    )
+    return TwoTierMatrix(
+        measured=measured_by_arm,
+        measured_tier=measured_tier,
+        vendor_reported=list(vendor_claims),
+        vendor_tier=vendor_tier,
+    )
