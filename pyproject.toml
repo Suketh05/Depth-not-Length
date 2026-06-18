@@ -142,6 +142,8 @@ explicit_package_bases = true
 module = [
     "sklearn.*",
     "scipy.*",
+    "anthropic.*",
+    "openai.*",
     "rank_bm25.*",
     "statsmodels.*",
     "sentence_transformers.*",
