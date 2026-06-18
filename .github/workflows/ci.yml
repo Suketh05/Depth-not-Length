@@ -13,6 +13,13 @@ jobs:
   quality:
     name: lint + type + test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Pin every uv invocation (sync AND `uv run`) to the matrix interpreter.
+    # Without this, `uv run` falls back to .python-version (3.12), finds the
+    # synced venv mismatched, rebuilds it WITHOUT the dev/viz extras, and the
+    # tools (ruff/mypy/pytest) vanish on the 3.10/3.11 legs. UV_PYTHON overrides
+    # .python-version so the venv stays consistent across steps.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +33,7 @@ jobs:
           enable-cache: true
 
       - name: Sync (core + dev + viz, no network-bound extras)
-        run: uv sync --extra dev --extra viz --python ${{ matrix.python-version }}
+        run: uv sync --extra dev --extra viz
 
       - name: Ruff (lint + format check)
         run: |
