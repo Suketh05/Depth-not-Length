@@ -45,3 +45,32 @@ jobs:
           uv run maturin develop --release --manifest-path crates/membench-kernels/Cargo.toml
       - name: Parity (Rust vs NumPy)
         run: uv run pytest tests/test_rust_kernel.py -v
+
+  cuda-kernel:
+    name: CUDA kernel (compile-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Jimver/cuda-toolkit@v0.2.18
+        with:
+          cuda: "12.4.0"
+          method: network
+          sub-packages: '["nvcc"]'
+      - name: Compile the CUDA kernel
+        run: |
+          mkdir -p cuda/build
+          nvcc -O3 -shared -Xcompiler -fPIC cuda/cosine_topk.cu -o cuda/build/libmembench_cuda.so
+
+  go-orchestrator:
+    name: Go orchestrator (vet + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - working-directory: orchestrator
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go build ./...
