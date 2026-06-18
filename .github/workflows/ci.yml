@@ -43,5 +43,8 @@ jobs:
       - name: Mypy (strict)
         run: uv run mypy src
 
-      - name: Pytest (offline arms only; exclude live/neural)
+      - name: Build native kernels (C)
+        run: make -C native/c
+
+      - name: Pytest (offline arms only; native parity included, live/neural excluded)
         run: uv run pytest -m "not live and not neural" --cov --cov-report=term-missing
