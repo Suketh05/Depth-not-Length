@@ -1,0 +1,14 @@
+# Default benchmark run configuration. The budget is keyed by dataset, never by arm:
+# every arm sees the same budget for a given dataset (the fairness lock).
+datasets: [synthetic, dcbench, swebench]
+arms: [none, bm25, tfidf, dense, hybrid_rrf, rerank_ce, raptor, brief_graph_3hop]
+models: [claude]
+budget_tokens_by_dataset:
+  synthetic: 150
+  dcbench: 250
+  swebench: 500
+  longmemeval: 8000
+seed: 0
+per_depth: 10
+retry_policy: single_shot
+offline: true
