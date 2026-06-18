@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import stats
 
 __all__ = ["BetaPosterior", "beta_binomial_posterior", "prob_superiority"]
@@ -41,7 +42,7 @@ class BetaPosterior:
         lo, hi = stats.beta.ppf([tail, 1.0 - tail], self.alpha, self.beta)
         return float(lo), float(hi)
 
-    def sample(self, n: int, seed: int = 0) -> np.ndarray:
+    def sample(self, n: int, seed: int = 0) -> NDArray[np.float64]:
         """Draw ``n`` posterior samples of the rate (seeded)."""
         return np.asarray(stats.beta.rvs(self.alpha, self.beta, size=n, random_state=seed))
 
