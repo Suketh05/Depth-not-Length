@@ -1,0 +1,2 @@
+# Isolated env for the Cognee adapter (needs an LLM key).
+cognee>=0.1.0
