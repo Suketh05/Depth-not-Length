@@ -141,6 +141,7 @@ explicit_package_bases = true
 # Third-party libs without complete type stubs.
 module = [
     "sklearn.*",
+    "scipy.*",
     "rank_bm25.*",
     "statsmodels.*",
     "sentence_transformers.*",
