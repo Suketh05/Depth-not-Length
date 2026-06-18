@@ -1,0 +1,3 @@
+# Isolated env for the Zep/Graphiti adapter (also needs a Neo4j backend:
+# NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD).
+graphiti-core>=0.3

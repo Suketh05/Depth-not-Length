@@ -1,0 +1,4 @@
+# Isolated env for the LangChain vector-retriever adapter.
+langchain-community>=0.2
+langchain-core>=0.2
+faiss-cpu>=1.8

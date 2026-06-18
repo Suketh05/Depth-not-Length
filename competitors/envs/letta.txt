@@ -1,0 +1,2 @@
+# Isolated env for the Letta (MemGPT) adapter (needs a running Letta server or key).
+letta-client>=0.1.0

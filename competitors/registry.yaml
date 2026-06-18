@@ -1,0 +1,72 @@
+# Vendor-reported / published claims (Tier 2).
+#
+# This file holds numbers REPORTED BY VENDORS or their papers, under THEIR OWN
+# conditions. They are NEVER mixed with numbers we measured under identical
+# conditions (Tier 1); the analysis layer keeps the two tiers in separate, labelled
+# columns. Every entry carries a source_url and the conditions under which the
+# number was produced. Entries with `needs_citation: true` are placeholders pending
+# a verified primary source and must not be published until verified.
+#
+# Recording a competitor's strong published numbers here (rather than hiding them)
+# is what makes the comparison read as generous and independent.
+
+claims:
+  # --- Brief's own publicly stated proof points (from briefhq.ai) -------------
+  - system: Brief
+    category: structured_context_layer
+    metric: agent_decision_compliance
+    value: 0.95
+    baseline_value: 0.46
+    unit: fraction
+    source_url: https://briefhq.ai/return-on-tokens/
+    conditions: "dcbench-style coding tasks; Brief context vs codebase-alone; vendor-reported"
+    accessed: "2026-06-18"
+    needs_citation: false
+  - system: Brief
+    category: structured_context_layer
+    metric: merge_ready_tasks
+    value: 1.0
+    baseline_value: 0.25
+    unit: fraction
+    source_url: https://briefhq.ai/return-on-tokens/
+    conditions: "8/8 merge-ready with Brief vs 2/8 without; vendor-reported"
+    accessed: "2026-06-18"
+    needs_citation: false
+  - system: Brief
+    category: token_economics
+    metric: cost_per_merge_ready_task_reduction
+    value: 0.68
+    unit: fraction
+    source_url: https://briefhq.ai/return-on-tokens/
+    conditions: "$2.07 -> $0.66 per merge-ready task; ~identical total tokens; vendor-reported"
+    accessed: "2026-06-18"
+    needs_citation: false
+
+  # --- Competitor published claims (PENDING VERIFICATION before publication) --
+  - system: Mem0
+    category: llm_extraction_memory
+    metric: relative_accuracy_improvement_over_openai_memory
+    value: null
+    unit: fraction
+    source_url: https://arxiv.org/abs/2504.19413
+    conditions: "Mem0 paper, LOCOMO benchmark; different dataset/metric; VERIFY exact figure"
+    accessed: "2026-06-18"
+    needs_citation: true
+  - system: Zep
+    category: temporal_knowledge_graph_memory
+    metric: deep_memory_retrieval_accuracy
+    value: null
+    unit: fraction
+    source_url: https://arxiv.org/abs/2501.13956
+    conditions: "Zep/Graphiti paper, DMR + LongMemEval; different conditions; VERIFY exact figure"
+    accessed: "2026-06-18"
+    needs_citation: true
+  - system: GraphRAG
+    category: community_graph_rag
+    metric: answer_comprehensiveness_winrate_vs_vector_rag
+    value: null
+    unit: fraction
+    source_url: https://arxiv.org/abs/2404.16130
+    conditions: "Microsoft GraphRAG paper; LLM-judged comprehensiveness; VERIFY exact figure"
+    accessed: "2026-06-18"
+    needs_citation: true

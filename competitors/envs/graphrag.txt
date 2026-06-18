@@ -1,0 +1,2 @@
+# Isolated env for the GraphRAG adapter (Microsoft GraphRAG; needs an LLM key).
+graphrag>=0.3.0
