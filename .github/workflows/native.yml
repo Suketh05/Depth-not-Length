@@ -1,0 +1,47 @@
+name: native
+
+# Builds the optional native accelerators and runs their byte-for-byte parity tests
+# against the NumPy reference. These are not required for the reported numbers (the
+# Python pipeline is self-contained), but keeping them green proves the native paths
+# stay equivalent to the reference.
+
+on:
+  push:
+    branches: [main, research-grade-refactor]
+  pull_request:
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  c-kernel:
+    name: C / NEON kernel parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - name: Build C kernel
+        run: make -C native/c
+      - name: Parity (native vs NumPy)
+        run: uv run pytest tests/test_native_kernels.py -v
+
+  rust-kernel:
+    name: Rust / PyO3 kernel parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: uv sync --extra dev
+      - name: Build the Rust extension (maturin)
+        run: |
+          uv pip install maturin
+          uv run maturin develop --release --manifest-path crates/membench-kernels/Cargo.toml
+      - name: Parity (Rust vs NumPy)
+        run: uv run pytest tests/test_rust_kernel.py -v

@@ -1,0 +1,17 @@
+[package]
+name = "membench-kernels"
+version = "0.1.0"
+edition = "2021"
+description = "Native (Rust/PyO3) retrieval kernels for the membench benchmark."
+license = "Apache-2.0"
+
+[lib]
+name = "membench_kernels"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[profile.release]
+opt-level = 3
+lto = true
