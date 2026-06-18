@@ -57,11 +57,13 @@ class RandomContextMemory(MemorySystem):
     """Fill the budget with randomly ordered items (the negative control).
 
     The query is deliberately ignored: selection must not depend on relevance, or
-    this would no longer isolate "budget, not structure". A seed makes the shuffle
-    reproducible across runs.
+    this would no longer isolate "budget, not structure". The shuffle is seeded so the
+    negative control is reproducible: the offline pipeline must be deterministic, and a
+    `random.Random(None)` (entropy-seeded) default would make every run's random_context
+    compliance differ. Defaults to the repo-canonical seed 0; callers may override.
     """
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int = 0) -> None:
         self._items: list[MemoryItem] = []
         self._rng = random.Random(seed)
 
