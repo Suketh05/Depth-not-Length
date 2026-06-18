@@ -116,6 +116,7 @@ select = [
 ignore = [
     "D203",  # one-blank-line-before-class (conflicts with D211)
     "D213",  # multi-line-summary-second-line (conflicts with D212)
+    "D105",  # docstrings on magic methods (numpy convention does not require them)
 ]
 
 [tool.ruff.lint.per-file-ignores]
