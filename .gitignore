@@ -34,3 +34,8 @@ figures/
 *.bin
 *.safetensors
 .cache/
+
+# Native build artifacts
+native/c/build/
+*.dylib
+*.so
