@@ -1,0 +1,15 @@
+{
+  "name": "@membench/seed",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Seed a Brief workspace with the dcbench decisions before a benchmark run (for the brief_live arm).",
+  "bin": { "membench-seed": "dist/seed.js" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "seed": "node dist/seed.js"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "typescript": "^5.4.0", "@types/node": "^20.11.0" }
+}

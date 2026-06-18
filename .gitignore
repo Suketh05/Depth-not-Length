@@ -39,3 +39,7 @@ figures/
 native/c/build/
 *.dylib
 *.so
+
+# Node / TypeScript
+node_modules/
+tools/seed/dist/
