@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [main, research-grade-refactor]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: lint + type + test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    # Pin every uv invocation (sync AND `uv run`) to the matrix interpreter.
+    # Without this, `uv run` falls back to .python-version (3.12), finds the
+    # synced venv mismatched, rebuilds it WITHOUT the dev/viz extras, and the
+    # tools (ruff/mypy/pytest) vanish on the 3.10/3.11 legs. UV_PYTHON overrides
+    # .python-version so the venv stays consistent across steps.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync (core + dev + viz, no network-bound extras)
+        run: uv sync --extra dev --extra viz
+
+      - name: Ruff (lint + format check)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Mypy (strict)
+        run: uv run mypy src
+
+      - name: Pytest (offline arms only; exclude live/neural)
+        run: uv run pytest -m "not live and not neural" --cov --cov-report=term-missing
