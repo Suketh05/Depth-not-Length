@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import optimize
 
 __all__ = ["ModelFit", "aic", "bic", "compare_decay_models"]
@@ -54,7 +55,9 @@ class ModelFit:
     bic: float
 
 
-def _linear_logspace_rss(x: np.ndarray, log_s: np.ndarray) -> tuple[float, float, float]:
+def _linear_logspace_rss(
+    x: NDArray[np.float64], log_s: NDArray[np.float64]
+) -> tuple[float, float, float]:
     # least squares log_s = intercept + slope * x
     design = np.column_stack([np.ones_like(x), x])
     beta, *_ = np.linalg.lstsq(design, log_s, rcond=None)
@@ -89,7 +92,9 @@ def compare_decay_models(
     )
 
     # stretched-exponential: log s = log s0 - (lambda i)^beta
-    def model(x: np.ndarray, log_s0: float, lam: float, beta: float) -> np.ndarray:
+    def model(
+        x: NDArray[np.float64], log_s0: float, lam: float, beta: float
+    ) -> NDArray[np.float64]:
         return np.asarray(log_s0 - (np.abs(lam) * x) ** np.abs(beta), dtype=np.float64)
 
     try:

@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+from numpy.typing import NDArray
 
 __all__ = [
     "dominates",
@@ -50,7 +51,7 @@ def pareto_frontier(points: Sequence[tuple[float, float]]) -> list[int]:
     return frontier
 
 
-def _ecdf_on_grid(sample: np.ndarray, grid: np.ndarray) -> np.ndarray:
+def _ecdf_on_grid(sample: NDArray[np.float64], grid: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.searchsorted(np.sort(sample), grid, side="right") / sample.size
 
 
