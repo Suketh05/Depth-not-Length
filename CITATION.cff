@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this benchmark, please cite it as below."
+title: "membench: Depth, Not Length — a benchmark for structured vs. similarity-based agent memory"
+abstract: >-
+  A depth-stratified benchmark measuring whether structured memory (typed records
+  joined by explicit links) recovers deep causal context that similarity-based
+  retrieval cannot, and quantifying the crossover depth at which the two regimes
+  diverge on accuracy and token cost.
+authors:
+  - family-names: "BriefBench authors"
+keywords:
+  - agent memory
+  - retrieval-augmented generation
+  - knowledge graph
+  - information retrieval benchmark
+license: Apache-2.0
+repository-code: "https://github.com/Suketh05/BriefBench"
+version: 0.1.0
