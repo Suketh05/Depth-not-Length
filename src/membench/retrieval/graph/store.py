@@ -18,7 +18,7 @@ queries, which is what makes bounded BFS traversal cheap.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
@@ -121,6 +121,24 @@ class TypedGraph:
         self._edges.append(edge)
         self._out[edge.source_id].append(index)
         self._in[edge.target_id].append(index)
+
+    def prune_edges(self, keep: Callable[[GraphEdge], bool]) -> int:
+        """Drop edges for which ``keep`` is false; rebuild adjacency. Returns count removed.
+
+        Used by the usage-aware decay model to remove stale, never-traversed,
+        low-confidence links (Brief prunes the same class of edge).
+        """
+        survivors = [edge for edge in self._edges if keep(edge)]
+        removed = len(self._edges) - len(survivors)
+        self._edges = []
+        self._out = {nid: [] for nid in self._nodes}
+        self._in = {nid: [] for nid in self._nodes}
+        for edge in survivors:
+            index = len(self._edges)
+            self._edges.append(edge)
+            self._out[edge.source_id].append(index)
+            self._in[edge.target_id].append(index)
+        return removed
 
     # -- access -----------------------------------------------------------------
 
