@@ -79,19 +79,21 @@ def compare_decay_models(
     n = int(i.size)
     fits: dict[str, ModelFit] = {}
 
-    # geometric: log s = log s0 + i log rho
+    # Parameter counts include the Gaussian variance sigma^2 (k = n_coef + 1), the
+    # standard convention for likelihood-based AIC/BIC on a regression fit.
+    # geometric: log s = log s0 + i log rho  (2 coefficients + sigma^2)
     b0, b1, rss = _linear_logspace_rss(i, log_s)
     fits["geometric"] = ModelFit(
-        "geometric", {"s0": math.exp(b0), "rho": math.exp(b1)}, rss, aic(rss, n, 2), bic(rss, n, 2)
+        "geometric", {"s0": math.exp(b0), "rho": math.exp(b1)}, rss, aic(rss, n, 3), bic(rss, n, 3)
     )
 
-    # power-law: log s = log s0 - alpha log(i+1)
+    # power-law: log s = log s0 - alpha log(i+1)  (2 coefficients + sigma^2)
     b0p, b1p, rssp = _linear_logspace_rss(np.log(i + 1.0), log_s)
     fits["power_law"] = ModelFit(
-        "power_law", {"s0": math.exp(b0p), "alpha": -b1p}, rssp, aic(rssp, n, 2), bic(rssp, n, 2)
+        "power_law", {"s0": math.exp(b0p), "alpha": -b1p}, rssp, aic(rssp, n, 3), bic(rssp, n, 3)
     )
 
-    # stretched-exponential: log s = log s0 - (lambda i)^beta
+    # stretched-exponential: log s = log s0 - (lambda i)^beta  (3 coefficients + sigma^2)
     def model(
         x: NDArray[np.float64], log_s0: float, lam: float, beta: float
     ) -> NDArray[np.float64]:
@@ -104,8 +106,8 @@ def compare_decay_models(
             "stretched_exp",
             {"s0": math.exp(popt[0]), "lambda": abs(popt[1]), "beta": abs(popt[2])},
             rss_s,
-            aic(rss_s, n, 3),
-            bic(rss_s, n, 3),
+            aic(rss_s, n, 4),
+            bic(rss_s, n, 4),
         )
     except (RuntimeError, ValueError):  # pragma: no cover - fit failure path
         fits["stretched_exp"] = ModelFit("stretched_exp", {}, math.inf, math.inf, math.inf)

@@ -1,0 +1,157 @@
+name: native
+
+# Builds the optional native accelerators and runs their byte-for-byte parity tests
+# against the NumPy reference. These are not required for the reported numbers (the
+# Python pipeline is self-contained), but keeping them green proves the native paths
+# stay equivalent to the reference.
+
+on:
+  push:
+    branches: [main, research-grade-refactor]
+  pull_request:
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  c-kernel:
+    name: C / NEON kernel parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - name: Build C kernel
+        run: make -C native/c
+      - name: Parity (native vs NumPy)
+        run: uv run pytest tests/test_native_kernels.py -v
+
+  rust-kernel:
+    name: Rust / PyO3 kernel parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: uv sync --extra dev
+      - name: Build the Rust extension (maturin)
+        run: |
+          uv pip install maturin
+          uv run maturin develop --release --manifest-path crates/membench-kernels/Cargo.toml
+      - name: Parity (Rust vs NumPy)
+        run: uv run pytest tests/test_rust_kernel.py -v
+
+  cuda-kernel:
+    name: CUDA kernel (compile-only)
+    # ubuntu-24.04 (current ubuntu-latest) has no apt candidate for cuda-nvcc-12-4;
+    # the CUDA 12.4 network repo resolves on 22.04. Pin the runner to keep nvcc installable.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Jimver/cuda-toolkit@v0.2.18
+        with:
+          cuda: "12.4.0"
+          method: network
+          sub-packages: '["nvcc"]'
+      - name: Compile the CUDA kernel
+        run: |
+          mkdir -p cuda/build
+          nvcc -O3 -shared -Xcompiler -fPIC cuda/cosine_topk.cu -o cuda/build/libmembench_cuda.so
+
+  go-orchestrator:
+    name: Go orchestrator (vet + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - working-directory: orchestrator
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go build ./...
+
+  ts-seeder:
+    name: TypeScript seeder (typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - working-directory: tools/seed
+        run: |
+          npm ci
+          npm run typecheck
+
+  sql-schema:
+    name: SQL graph schema (sqlite validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Validate the schema parses and the traversal CTE runs
+        run: sqlite3 ":memory:" < schema/graph.sql
+
+  scripts:
+    name: Reproduction scripts (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh
+      - name: PowerShell parse check
+        shell: pwsh
+        run: |
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "scripts/reproduce.ps1", [ref]$null, [ref]$errs)
+          if ($errs) { $errs; exit 1 }
+          Write-Host "reproduce.ps1 parses clean"
+
+  csharp-ndcg:
+    name: C# nDCG reference (differential test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - working-directory: reference/csharp-ndcg
+        run: dotnet test --nologo
+
+  java-bm25:
+    name: Java BM25 reference (differential test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - working-directory: reference/java-bm25
+        run: mvn -q --batch-mode test
+
+  r-critical-difference:
+    name: R Friedman/Nemenyi cross-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - run: Rscript reference/r/critical_difference.R
+
+  dockerfile:
+    name: Dockerfile (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile

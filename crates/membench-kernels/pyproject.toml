@@ -1,0 +1,16 @@
+# Built separately from the pure-Python package, via maturin:
+#   uv pip install maturin && maturin develop --release -m crates/membench-kernels/pyproject.toml
+# Produces the importable `membench_kernels` extension; the Python layer uses it when
+# present and falls back to the C kernel / NumPy reference otherwise.
+[build-system]
+requires = ["maturin>=1.5"]
+build-backend = "maturin"
+
+[project]
+name = "membench-kernels"
+version = "0.1.0"
+description = "Native Rust retrieval kernels for membench (cosine top-k, BM25 scoring)."
+requires-python = ">=3.10"
+
+[tool.maturin]
+module-name = "membench_kernels"
