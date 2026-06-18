@@ -96,3 +96,20 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Validate the schema parses and the traversal CTE runs
         run: sqlite3 ":memory:" < schema/graph.sql
+
+  scripts:
+    name: Reproduction scripts (lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh
+      - name: PowerShell parse check
+        shell: pwsh
+        run: |
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "scripts/reproduce.ps1", [ref]$null, [ref]$errs)
+          if ($errs) { $errs; exit 1 }
+          Write-Host "reproduce.ps1 parses clean"
