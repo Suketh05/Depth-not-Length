@@ -1,0 +1,130 @@
+{
+  "_provenance": {
+    "source": "github.com/brief-hq/dcbench",
+    "commit": "9f507ce0a6ef61124aca90cc4e17fb80592a5e4e",
+    "file": "benchmark/seed-data.ts (BENCHMARK_DECISIONS)",
+    "note": "Transcribed verbatim; decision IDs assigned by array order (D-001..D-015), matching the gotcha.decisionId references in benchmark/tasks.ts and the repo README's decision table."
+  },
+  "decisions": [
+    {
+      "id": "D-001",
+      "topic": "Date range component standardization",
+      "decision": "DateRangePicker is the standard date range component. CalendarRange is deprecated after the mobile redesign and must not be used in new code.",
+      "rationale": "CalendarRange had accessibility issues on mobile and was replaced during the mobile redesign. All new date-range UIs must use DateRangePicker from the design system.",
+      "category": "design",
+      "severity": "important"
+    },
+    {
+      "id": "D-002",
+      "topic": "Audit logging on data exports",
+      "decision": "All data exports must go through the audit log middleware. Every export endpoint must call withAuditLog() before streaming data.",
+      "rationale": "SOC-2 compliance requires a full audit trail of every data export. The audit log middleware captures who exported what, when, and the row count. Skipping it is a compliance violation.",
+      "category": "tech",
+      "severity": "blocking"
+    },
+    {
+      "id": "D-003",
+      "topic": "Button variant usage policy",
+      "decision": "Primary buttons are reserved for data-mutating actions only. Read-only actions like exports, downloads, and navigation use the secondary button variant.",
+      "rationale": "User testing showed decision fatigue when multiple primary buttons competed for attention. Reserving primary for mutations (save, delete, submit) creates a clear visual hierarchy.",
+      "category": "design",
+      "severity": "info"
+    },
+    {
+      "id": "D-004",
+      "topic": "Pagination strategy for list endpoints",
+      "decision": "All list endpoints must use cursor-based pagination. Offset pagination is not allowed for new endpoints.",
+      "rationale": "Offset pagination breaks when data is inserted or deleted during paging, causing duplicates or skipped records. Cursor pagination is stable and performs better on large datasets.",
+      "category": "tech",
+      "severity": "important"
+    },
+    {
+      "id": "D-005",
+      "topic": "Loading state pattern standardization",
+      "decision": "Use the ShimmerSkeleton loading pattern from the design system. PulseLoader is deprecated and must not be used in new code.",
+      "rationale": "Design system standardization effort unified all loading states to shimmer skeletons. They provide better perceived performance by showing content shape while loading.",
+      "category": "design",
+      "severity": "info"
+    },
+    {
+      "id": "D-006",
+      "topic": "Auth middleware freeze",
+      "decision": "The authentication middleware is frozen and must not be modified. Any auth changes require a compliance review first.",
+      "rationale": "The auth middleware passed a compliance audit (SEC-2024-0915-AUTH). Any modification requires re-certification. Changes must go through the security team and compliance review process.",
+      "category": "tech",
+      "severity": "blocking"
+    },
+    {
+      "id": "D-007",
+      "topic": "Error message help center references",
+      "decision": "All user-facing error messages must include a link to the relevant help center article. Use the helpCenterUrl() utility to generate links.",
+      "rationale": "Support ticket analysis showed 40% of tickets were about errors with clear help center documentation. Adding links directly in error messages reduced repeat tickets significantly.",
+      "category": "product",
+      "severity": "info"
+    },
+    {
+      "id": "D-008",
+      "topic": "Feature flag implementation",
+      "decision": "Feature flags must use posthog.isFeatureEnabled() from the PostHog SDK. Custom feature flag implementations are not allowed.",
+      "rationale": "PostHog provides centralized flag management, gradual rollouts, and analytics integration. Custom implementations fragment flag state and lack audit trails.",
+      "category": "tech",
+      "severity": "important"
+    },
+    {
+      "id": "D-009",
+      "topic": "Test file co-location",
+      "decision": "Test files must be co-located next to their source files (e.g., utils.test.ts next to utils.ts). Do not use a separate __tests__/ directory.",
+      "rationale": "Co-location makes it obvious when a file lacks tests and simplifies imports. The __tests__/ convention caused files to drift out of sync with their sources.",
+      "category": "process",
+      "severity": "info"
+    },
+    {
+      "id": "D-010",
+      "topic": "API route validation pattern",
+      "decision": "All API routes must use Zod schemas for request validation wrapped in the withAuth middleware. This is the standard pattern for all new API endpoints.",
+      "rationale": "Zod provides runtime type safety with TypeScript inference. The withAuth wrapper handles authentication, rate limiting, and error formatting consistently.",
+      "category": "tech",
+      "severity": "important"
+    },
+    {
+      "id": "D-011",
+      "topic": "Notification delivery strategy",
+      "decision": "The notification system uses async digest delivery. Real-time push notifications are a deliberate non-goal for the current product phase.",
+      "rationale": "User research showed notification fatigue with real-time alerts. Async digests let users batch-process notifications at their own pace, improving engagement metrics. Real-time was evaluated and rejected per ADR-007.",
+      "category": "product",
+      "severity": "important"
+    },
+    {
+      "id": "D-012",
+      "topic": "Keyboard navigation for list views",
+      "decision": "All list views must support full keyboard navigation including arrow keys, Enter to select, and Escape to deselect. This is an accessibility requirement.",
+      "rationale": "WCAG 2.1 AA compliance requires keyboard operability for all interactive elements. List views are a core interaction pattern and must be navigable without a mouse.",
+      "category": "design",
+      "severity": "important"
+    },
+    {
+      "id": "D-013",
+      "topic": "Database query approach",
+      "decision": "All database queries must use the Drizzle query builder. Raw SQL queries are not allowed in application code.",
+      "rationale": "Drizzle provides type-safe queries, automatic migration generation, and protection against SQL injection. Raw SQL bypasses these safeguards and makes refactoring harder.",
+      "category": "tech",
+      "severity": "important"
+    },
+    {
+      "id": "D-014",
+      "topic": "Environment variable management",
+      "decision": "Environment configuration must use @t3-oss/env-nextjs for validation. Direct process.env access is not allowed -- all env vars must be declared in the env schema.",
+      "rationale": "T3 env provides build-time validation of required environment variables and TypeScript types. Direct process.env access is untyped and fails silently when vars are missing.",
+      "category": "tech",
+      "severity": "info"
+    },
+    {
+      "id": "D-015",
+      "topic": "Toast notification library",
+      "decision": "Toast notifications must use the sonner library. Do not use react-hot-toast, custom toast implementations, or window.alert.",
+      "rationale": "Sonner integrates with our design system tokens, supports accessible announcements, and provides consistent animations. Multiple toast libraries create inconsistent UX.",
+      "category": "design",
+      "severity": "info"
+    }
+  ]
+}

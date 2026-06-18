@@ -101,22 +101,35 @@ class BriefGraphMemory(MemorySystem):
         return [self._items[i].item_id for i in idx]
 
     def retrieve(self, query: str, budget_tokens: int) -> RetrievedContext:
-        """Seed by similarity, traverse the typed links, and pack the result to budget."""
+        """Seed by similarity, follow links most-relevant-thread-first, pack to budget.
+
+        Seeds are expanded in descending similarity order, each via its own bounded
+        traversal, and the reached nodes are concatenated (de-duplicated). This is
+        the standard relevance-ordered graph expansion: the chain hanging off the
+        most query-relevant entity -- which carries the governing decision behind
+        its links -- is packed before less-relevant chains, so a deep governing node
+        survives a tight budget instead of being crowded out.
+        """
         if not self._items:
             return RetrievedContext.empty()
-        seed_ids = self._seed_ids(query)
-        result = traverse(
-            self._graph,
-            seed_ids,
-            max_hops=self._max_hops,
-            track_traversal=self._use_decay,
-            tick=self._tick,
-        )
+        ordered: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for seed_id in self._seed_ids(query):
+            result = traverse(
+                self._graph,
+                [seed_id],
+                max_hops=self._max_hops,
+                track_traversal=self._use_decay,
+                tick=self._tick,
+            )
+            for node, _depth in result.nodes:
+                if node.node_id not in seen:
+                    seen.add(node.node_id)
+                    ordered.append((node.node_id, node.text))
         if self._use_decay:
             self._tick += 1
             apply_decay(self._graph, self._tick, self._decay_policy)
-        ranked = [(node.node_id, node.text) for node, _ in result.nodes]
-        return pack_to_budget(ranked, budget_tokens)
+        return pack_to_budget(ordered, budget_tokens)
 
 
 @register_arm("brief_graph_1hop", family=ArmFamily.GRAPH, follows_links=True, uses_embeddings=True)
