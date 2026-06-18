@@ -1,0 +1,2 @@
+# Isolated env for the Supermemory adapter.
+supermemory>=3.0.0

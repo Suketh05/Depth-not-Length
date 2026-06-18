@@ -150,6 +150,17 @@ module = [
     "networkx.*",
     "seaborn.*",
     "mcp.*",
+    "supermemory.*",
+    "zep_cloud.*",
+    "graphiti_core.*",
+    "graphrag.*",
+    "letta.*",
+    "letta_client.*",
+    "cognee.*",
+    "langchain.*",
+    "langchain_community.*",
+    "langchain_core.*",
+    "faiss.*",
 ]
 ignore_missing_imports = true
 
