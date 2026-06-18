@@ -1,0 +1,164 @@
+{
+  "_provenance": {
+    "source": "github.com/brief-hq/dcbench",
+    "commit": "9f507ce0a6ef61124aca90cc4e17fb80592a5e4e",
+    "file": "benchmark/tasks.ts (BENCHMARK_TASKS)",
+    "note": "Transcribed verbatim, dropping fields the original TS scoring harness uses for git-diff regex checks (pass/fail check patterns, expectedFiles) since those aren't part of our Task/MemoryItem contract. TASK-014 is excluded: its only gotcha (D-PERSONA-001) tests a persona, not a seeded decision, so it doesn't fit dcbench's 'decisions invisible in code' framing."
+  },
+  "tasks": [
+    {
+      "task_id": "TASK-001",
+      "title": "CSV export to analytics dashboard",
+      "prompt": "Add a CSV export button to the analytics dashboard. Users should be able to pick a date range, preview how many records they'll get, and download their data as a CSV file. Put the export button next to the existing filters.",
+      "difficulty": "hard",
+      "category": "full-stack",
+      "gotchas": [
+        {"decision_id": "D-002", "weight": 3},
+        {"decision_id": "D-001", "weight": 2},
+        {"decision_id": "D-003", "weight": 1}
+      ]
+    },
+    {
+      "task_id": "TASK-002",
+      "title": "Loading skeletons to settings page",
+      "prompt": "The settings page feels janky while loading -- users see a blank page for a second before content appears. Add skeleton loading states so users see placeholder content while data loads. Look at how other pages in the app handle loading for reference.",
+      "difficulty": "easy",
+      "category": "ui-component",
+      "gotchas": [
+        {"decision_id": "D-005", "weight": 2},
+        {"decision_id": "D-005", "weight": 2}
+      ]
+    },
+    {
+      "task_id": "TASK-003",
+      "title": "Cursor pagination to users API",
+      "prompt": "Our users list API endpoint returns all users at once which is getting slow as we scale. Add pagination to the GET /api/users endpoint so clients can page through results efficiently. Return a next cursor that clients pass to get the next page.",
+      "difficulty": "medium",
+      "category": "api-endpoint",
+      "gotchas": [
+        {"decision_id": "D-004", "weight": 2},
+        {"decision_id": "D-010", "weight": 3}
+      ]
+    },
+    {
+      "task_id": "TASK-004",
+      "title": "Notification preferences page",
+      "prompt": "Build a notification preferences page where users can choose what notifications they want and how they want to receive them. Think email updates, product announcements, that kind of thing. Let them pick frequency and notification types.",
+      "difficulty": "medium",
+      "category": "full-stack",
+      "gotchas": [
+        {"decision_id": "D-011", "weight": 2},
+        {"decision_id": "D-008", "weight": 2}
+      ]
+    },
+    {
+      "task_id": "TASK-005",
+      "title": "Fix error messages on login page",
+      "prompt": "Our login page error messages are pretty unhelpful -- users just see \"Something went wrong\" when they enter wrong credentials or their session expires. Improve the error messages so users actually know what happened and how to fix it.",
+      "difficulty": "medium",
+      "category": "security",
+      "gotchas": [
+        {"decision_id": "D-007", "weight": 1},
+        {"decision_id": "D-006", "weight": 3}
+      ]
+    },
+    {
+      "task_id": "TASK-006",
+      "title": "Dark mode toggle to settings",
+      "prompt": "Add a dark mode toggle to the settings page. When users flip it, the app should switch between light and dark themes. Store the preference so it persists across sessions. Make sure to read the theme preference on app startup.",
+      "difficulty": "medium",
+      "category": "full-stack",
+      "gotchas": [
+        {"decision_id": "D-009", "weight": 1},
+        {"decision_id": "D-014", "weight": 3}
+      ]
+    },
+    {
+      "task_id": "TASK-007",
+      "title": "Keyboard navigation to user list",
+      "prompt": "Make the users list table fully keyboard navigable. Users should be able to tab through rows, use arrow keys to move between them, and press Enter to open a user's profile. Make sure it works with screen readers too.",
+      "difficulty": "medium",
+      "category": "ui-component",
+      "gotchas": [
+        {"decision_id": "D-012", "weight": 1},
+        {"decision_id": "D-001", "weight": 2}
+      ]
+    },
+    {
+      "task_id": "TASK-008",
+      "title": "Bulk delete for admin dashboard",
+      "prompt": "Add bulk delete functionality to the admin dashboard. Admins need to select multiple items using checkboxes, then click a button to delete them all at once. Show a confirmation dialog before actually deleting. Make sure the action is logged.",
+      "difficulty": "medium",
+      "category": "full-stack",
+      "gotchas": [
+        {"decision_id": "D-003", "weight": 1},
+        {"decision_id": "D-002", "weight": 3}
+      ]
+    },
+    {
+      "task_id": "TASK-009",
+      "title": "Search to API endpoints",
+      "prompt": "We need search functionality on our API. Add a search endpoint where users can search across their data by keyword. Results should be paginated and the search input should be validated. Use the existing database setup for queries.",
+      "difficulty": "hard",
+      "category": "api-endpoint",
+      "gotchas": [
+        {"decision_id": "D-010", "weight": 3},
+        {"decision_id": "D-004", "weight": 2},
+        {"decision_id": "D-013", "weight": 2}
+      ]
+    },
+    {
+      "task_id": "TASK-010",
+      "title": "Toast notifications for form saves",
+      "prompt": "When users save a form on the settings page, they don't get any visual feedback that it worked. Add toast notifications for successful saves, validation errors, and server errors. Keep them brief and non-blocking.",
+      "difficulty": "easy",
+      "category": "ui-component",
+      "gotchas": [
+        {"decision_id": "D-015", "weight": 2}
+      ]
+    },
+    {
+      "task_id": "TASK-011",
+      "title": "User profile avatar upload",
+      "prompt": "Let users upload a profile avatar image. Show a button that opens a file picker, display a preview of the selected image, then upload it to our storage. Show the avatar in the header and on their profile page.",
+      "difficulty": "medium",
+      "category": "full-stack",
+      "gotchas": [
+        {"decision_id": "D-003", "weight": 1},
+        {"decision_id": "D-014", "weight": 3}
+      ]
+    },
+    {
+      "task_id": "TASK-012",
+      "title": "Rate limiting to API routes",
+      "prompt": "We're getting hammered by bots and need to protect our API. Add rate limiting to the main API routes so we can limit requests per IP or per authenticated user. Start with the users and analytics endpoints.",
+      "difficulty": "hard",
+      "category": "security",
+      "gotchas": [
+        {"decision_id": "D-010", "weight": 3},
+        {"decision_id": "D-006", "weight": 3}
+      ]
+    },
+    {
+      "task_id": "TASK-013",
+      "title": "Export audit log viewer",
+      "prompt": "Build an audit log viewer page for admins. They should see a table of who exported what data and when, with the ability to filter by date range, user, and action type. Include a loading skeleton while the data loads. Admins should also be able to export the audit log itself.",
+      "difficulty": "medium",
+      "category": "full-stack",
+      "gotchas": [
+        {"decision_id": "D-002", "weight": 3},
+        {"decision_id": "D-005", "weight": 2}
+      ]
+    },
+    {
+      "task_id": "TASK-015",
+      "title": "Feature flag for new analytics widget",
+      "prompt": "We're building a new analytics widget that shows conversion funnel data. Set up a feature flag so we can roll it out gradually -- show it to internal users first, then beta testers, then everyone. Add the widget component behind the flag.",
+      "difficulty": "easy",
+      "category": "configuration",
+      "gotchas": [
+        {"decision_id": "D-008", "weight": 2}
+      ]
+    }
+  ]
+}
