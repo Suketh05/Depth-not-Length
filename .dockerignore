@@ -1,0 +1,12 @@
+.git
+.venv
+node_modules
+tools/seed/node_modules
+tools/seed/dist
+results
+figures
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+native/c/build
