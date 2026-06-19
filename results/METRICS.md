@@ -1,8 +1,8 @@
-# 10-bucket metrics matrix (200-metric design)
+# 10-bucket metrics matrix (measured + cited)
 
-388 cells across 10 buckets. **Provenance per cell:** measured=349, projected=13, vendor=26.
+374 cells across 9 buckets. **Provenance per cell:** measured=349, vendor=25.
 
-`measured` = our harness · `vendor` = published+cited · `projected` = extrapolated (method in note; NOT a measurement, high uncertainty). Projections are never presented as measured.
+`measured` = our harness data · `vendor` = published competitor numbers, cited. Every cell is measured or cited; nothing is estimated.
 
 
 ## 1_retrieval_quality — 15 metrics, 75 cells
@@ -276,20 +276,6 @@
 | compliance_gpt_brief_graph_3hop_d3 | Brief | 1.0 | measured | gpt |
 | compliance_gpt_dense_d3 | dense (best baseline) | 0.6 | measured | gpt |
 
-## 8_latency_scale — 10 metrics, 10 cells
-| metric | system | value | tier | note |
-|---|---|---|---|---|
-| latency_reduction_vs_fullctx | Zep | 90.0 | vendor | 90%, getzep.com |
-| retrieval_latency_ms_Brief | Brief | 120 | projected | extrapolated from architecture; NOT measured |
-| retrieval_latency_ms_Mem0 | Mem0 | 300 | projected | extrapolated from architecture; NOT measured |
-| retrieval_latency_ms_Zep | Zep | 250 | projected | extrapolated from architecture; NOT measured |
-| retrieval_latency_ms_Supermemory | Supermemory | 180 | projected | extrapolated from architecture; NOT measured |
-| retrieval_latency_ms_GraphRAG | GraphRAG | 900 | projected | extrapolated from architecture; NOT measured |
-| retrieval_latency_ms_dense | dense | 40 | projected | extrapolated from architecture; NOT measured |
-| index_build_cost_rel_Brief | Brief | 1.0 | projected | extrapolated; GraphRAG builds LLM index per corpus |
-| index_build_cost_rel_Mem0 | Mem0 | 2.5 | projected | extrapolated; GraphRAG builds LLM index per corpus |
-| index_build_cost_rel_GraphRAG | GraphRAG | 12.0 | projected | extrapolated; GraphRAG builds LLM index per corpus |
-
 ## 9_capabilities — 5 metrics, 30 cells
 | metric | system | value | tier | note |
 |---|---|---|---|---|
@@ -324,19 +310,15 @@
 | no_external_service | dense | 1.0 | measured | from docs/architecture |
 | no_external_service | none | 1.0 | measured | from docs/architecture |
 
-## 10_competitor_head_to_head — 13 metrics, 13 cells
+## 10_competitor_head_to_head — 9 metrics, 9 cells
 | metric | system | value | tier | note |
 |---|---|---|---|---|
 | Mem0_headline_score | Mem0 | 66.9 | vendor | arXiv:2504.19413 |
 | Mem0_lift_over_baseline | Mem0 | 14.0 | vendor | arXiv:2504.19413 |
-| Mem0_proj_compliance_ours | Mem0 | 0.22 | projected | extrapolated from published lift over baseline; NOT a controlled run — high uncertainty |
 | Zep_headline_score | Zep | 94.8 | vendor | arXiv:2501.13956 |
 | Zep_lift_over_baseline | Zep | 18.5 | vendor | arXiv:2501.13956 |
-| Zep_proj_compliance_ours | Zep | 0.265 | projected | extrapolated from published lift over baseline; NOT a controlled run — high uncertainty |
 | GraphRAG_headline_score | GraphRAG | 77.5 | vendor | arXiv:2404.16130 |
 | GraphRAG_lift_over_baseline | GraphRAG | 50.0 | vendor | arXiv:2404.16130 |
-| GraphRAG_proj_compliance_ours | GraphRAG | 0.58 | projected | extrapolated from published lift over baseline; NOT a controlled run — high uncertainty |
 | Supermemory_headline_score | Supermemory | 59.7 | vendor | supermemory.ai (unverified) |
 | Supermemory_lift_over_baseline | Supermemory | 25.3 | vendor | supermemory.ai (unverified) |
-| Supermemory_proj_compliance_ours | Supermemory | 0.333 | projected | extrapolated from published lift over baseline; NOT a controlled run — high uncertainty |
 | Brief_compliance_ours | Brief | 0.7037 | measured | claude all-data |

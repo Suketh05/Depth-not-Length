@@ -334,16 +334,6 @@ bucket,metric,definition,system,value,tier,note
 7_cross_model,compliance_claude_random_context_d3,compliance Claude,random_context,,measured,claude
 7_cross_model,compliance_gpt_brief_graph_3hop_d3,compliance GPT-5.1,Brief,1.0,measured,gpt
 7_cross_model,compliance_gpt_dense_d3,compliance GPT-5.1,dense (best baseline),0.6,measured,gpt
-8_latency_scale,latency_reduction_vs_fullctx,published latency cut,Zep,90.0,vendor,"90%, getzep.com"
-8_latency_scale,retrieval_latency_ms_Brief,est. p50 retrieval latency,Brief,120,projected,extrapolated from architecture; NOT measured
-8_latency_scale,retrieval_latency_ms_Mem0,est. p50 retrieval latency,Mem0,300,projected,extrapolated from architecture; NOT measured
-8_latency_scale,retrieval_latency_ms_Zep,est. p50 retrieval latency,Zep,250,projected,extrapolated from architecture; NOT measured
-8_latency_scale,retrieval_latency_ms_Supermemory,est. p50 retrieval latency,Supermemory,180,projected,extrapolated from architecture; NOT measured
-8_latency_scale,retrieval_latency_ms_GraphRAG,est. p50 retrieval latency,GraphRAG,900,projected,extrapolated from architecture; NOT measured
-8_latency_scale,retrieval_latency_ms_dense,est. p50 retrieval latency,dense,40,projected,extrapolated from architecture; NOT measured
-8_latency_scale,index_build_cost_rel_Brief,relative per-corpus index cost,Brief,1.0,projected,extrapolated; GraphRAG builds LLM index per corpus
-8_latency_scale,index_build_cost_rel_Mem0,relative per-corpus index cost,Mem0,2.5,projected,extrapolated; GraphRAG builds LLM index per corpus
-8_latency_scale,index_build_cost_rel_GraphRAG,relative per-corpus index cost,GraphRAG,12.0,projected,extrapolated; GraphRAG builds LLM index per corpus
 9_capabilities,follows_typed_links,"capability (1=yes,0=no)",Brief,1.0,measured,from docs/architecture
 9_capabilities,follows_typed_links,"capability (1=yes,0=no)",Mem0,0.0,vendor,from docs/architecture
 9_capabilities,follows_typed_links,"capability (1=yes,0=no)",Zep,1.0,vendor,from docs/architecture
@@ -376,14 +366,10 @@ bucket,metric,definition,system,value,tier,note
 9_capabilities,no_external_service,"capability (1=yes,0=no)",none,1.0,measured,from docs/architecture
 10_competitor_head_to_head,Mem0_headline_score,published headline on LoCoMo,Mem0,66.9,vendor,arXiv:2504.19413
 10_competitor_head_to_head,Mem0_lift_over_baseline,published lift over baseline (pts),Mem0,14.0,vendor,arXiv:2504.19413
-10_competitor_head_to_head,Mem0_proj_compliance_ours,PROJECTED compliance in our harness,Mem0,0.22,projected,extrapolated from published lift over baseline; NOT a controlled run — high uncertainty
 10_competitor_head_to_head,Zep_headline_score,published headline on DMR/LongMemEval,Zep,94.8,vendor,arXiv:2501.13956
 10_competitor_head_to_head,Zep_lift_over_baseline,published lift over baseline (pts),Zep,18.5,vendor,arXiv:2501.13956
-10_competitor_head_to_head,Zep_proj_compliance_ours,PROJECTED compliance in our harness,Zep,0.265,projected,extrapolated from published lift over baseline; NOT a controlled run — high uncertainty
 10_competitor_head_to_head,GraphRAG_headline_score,published headline on QFS-comprehensiveness,GraphRAG,77.5,vendor,arXiv:2404.16130
 10_competitor_head_to_head,GraphRAG_lift_over_baseline,published lift over baseline (pts),GraphRAG,50.0,vendor,arXiv:2404.16130
-10_competitor_head_to_head,GraphRAG_proj_compliance_ours,PROJECTED compliance in our harness,GraphRAG,0.58,projected,extrapolated from published lift over baseline; NOT a controlled run — high uncertainty
 10_competitor_head_to_head,Supermemory_headline_score,published headline on LoCoMo/SWE-Ctx,Supermemory,59.7,vendor,supermemory.ai (unverified)
 10_competitor_head_to_head,Supermemory_lift_over_baseline,published lift over baseline (pts),Supermemory,25.3,vendor,supermemory.ai (unverified)
-10_competitor_head_to_head,Supermemory_proj_compliance_ours,PROJECTED compliance in our harness,Supermemory,0.333,projected,extrapolated from published lift over baseline; NOT a controlled run — high uncertainty
 10_competitor_head_to_head,Brief_compliance_ours,measured compliance in our harness,Brief,0.7037,measured,claude all-data
