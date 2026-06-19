@@ -122,7 +122,20 @@ class BriefGraphMemory(MemorySystem):
                 track_traversal=self._use_decay,
                 tick=self._tick,
             )
-            for node, _depth in result.nodes:
+            # The governing decisions are the nodes that code/justifications link TO via
+            # typed dependency edges -- the structured signal Brief is built to surface.
+            # Spend the budget on the seed plus those linked decisions, not on incidental
+            # neighbours reached along the way, so the governing context is not diluted
+            # (and more of a multi-decision chain fits under a tight budget). With no
+            # dependency edges (shallow tasks) this is a no-op and the seed ranking stands.
+            dep_targets = {
+                edge.target_id
+                for edge in result.edges
+                if edge.relationship_type is RelationshipType.CONSTRAINS
+            }
+            for node, depth in result.nodes:
+                if dep_targets and depth != 0 and node.node_id not in dep_targets:
+                    continue
                 if node.node_id not in seen:
                     seen.add(node.node_id)
                     ordered.append((node.node_id, node.text))

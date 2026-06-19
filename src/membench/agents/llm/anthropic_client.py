@@ -19,10 +19,14 @@ class AnthropicLLMClient(LLMClient):
         A model id present in the pricing table (e.g. ``claude-sonnet-4-6``).
     """
 
-    def __init__(self, model: str = "claude-sonnet-4-6") -> None:
+    def __init__(
+        self, model: str = "claude-sonnet-4-6", *, timeout: float = 60.0, max_retries: int = 3
+    ) -> None:
         if model not in PRICING:
             raise ValueError(f"no pricing entry for model {model!r}")
         self._model = model
+        self._timeout = timeout
+        self._max_retries = max_retries
         self._client: Any | None = None
 
     @property
@@ -38,7 +42,7 @@ class AnthropicLLMClient(LLMClient):
                 raise RuntimeError(
                     "AnthropicLLMClient needs the anthropic extra: uv sync --extra anthropic"
                 ) from exc
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(timeout=self._timeout, max_retries=self._max_retries)
         return self._client
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
