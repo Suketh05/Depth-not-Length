@@ -26,9 +26,12 @@ venv/
 coverage.xml
 htmlcov/
 
-# Benchmark outputs (regenerated; never committed)
-results/
-figures/
+# Ephemeral CLI run outputs at the results/ root (regenerated; never committed).
+# The curated results/ dossier subtree (data/, figures/, dossier/) IS committed.
+/results/*.jsonl
+/results/*.json
+/results/report.md
+/figures/
 
 # Models / large artifacts
 *.bin
