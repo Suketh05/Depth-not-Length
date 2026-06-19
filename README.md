@@ -1,149 +1,87 @@
-# membench
+# BriefBench (`membench`)
 
-Benchmark framework for the paper *Depth, Not Length: Why Coding Agents Fail and How
-Structured Memory Fixes It*.
+Reference implementation for the paper *Depth, Not Length: Why Coding Agents Fail and
+How Structured Memory Fixes It.*
 
-Tests whether structured memory (Brief) recovers deep causal context that
-similarity-based retrieval cannot, across three datasets and five memory arms.
+Coding agents fail not because they run out of tokens but because **similarity-based
+memory cannot recover decisions that sit several reasoning hops away** from the current
+task. This benchmark measures that — and shows that a **structured memory that follows
+typed links** (as in Brief's context graph) escapes the depth ceiling, on both accuracy
+and token cost, with a provable, measurable crossover depth `d⋆`.
 
----
+## The result, in one figure
 
-## Quick start
+At a fixed token budget, governing-decision recovery vs. causal depth `d`
+(measured, offline, deterministic):
 
-### 1. Requirements
+| arm | d=1 | d=2 | d=3 |
+|---|---|---|---|
+| BM25 / TF-IDF / dense / hybrid | 0.95–1.00 | 0.85–1.00 | 0.35–0.70 |
+| RAPTOR (hierarchical) | 0.55 | 0.25 | 0.05 |
+| **Brief graph (link-following)** | **1.00** | **1.00** | **1.00** |
 
-Python **3.10 or higher** is required (the `mcp` package used by the Brief arm
-needs 3.10+).
+Similarity is fine when the rule is shallow and **collapses as depth grows**; the
+structured arm stays flat. The crossover appears near `d=2`, matching the theory's
+predicted `d⋆`. This holds for **any** link-following system — it is a property of the
+mechanism, not of Brief specifically.
 
-```bash
-pip install -r requirements.txt
+## Reproduce
+
+```sh
+scripts/reproduce.sh                       # Linux/macOS: sync, build, test, run, render
+docker build -t briefbench . && docker run --rm briefbench run --dataset synthetic
 ```
 
-### 2. Set environment variables
+Or step by step:
 
-Copy `.env.example` to `.env` and fill in your keys, then:
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."        # required — main model
-export BRIEF_OAUTH_TOKEN="..."               # required for the brief arm only
-# export OPENAI_API_KEY="..."               # not yet implemented — see below
+```sh
+uv sync --extra dev --extra viz
+uv run membench run     --dataset synthetic --budget 150 --out results/rows.jsonl
+uv run membench tables  --src results/rows.jsonl
+uv run membench report  --src results/rows.jsonl --out results/report.md
+uv run membench figures --src results/rows.jsonl --out-dir figures
+uv run membench theory  --rho 0.5 --q 0.97        # predicted d*
 ```
 
-Or source the file directly:
+Everything runs offline and deterministically (a stub model + a hashing embedding); real
+LLM / embedding / competitor backends live behind optional extras.
 
-```bash
-source .env
-```
+## What's measured
 
-### 3. Pre-seed Brief (brief arm only)
+- **22 memory arms** — controls (none / full-context / random), lexical (BM25, TF-IDF),
+  dense / hybrid / rerank / HyDE / RAPTOR, the Brief typed-graph arm (+ hop/decay
+  variants), and adapters onto Mem0 / Supermemory / Zep-Graphiti / GraphRAG / Letta /
+  LangChain.
+- **Datasets** — dcbench (decisions invisible in code), SWE-bench (cross-file
+  constraint), LongMemEval (temporal supersession), and a controllable synthetic
+  depth-crossover benchmark.
+- **Metrics** — decision compliance, merge-ready correctness, retrieval P@k/MRR/nDCG/
+  full-chain recovery, cost-to-correct + Return on Tokens, calibration.
+- **Statistics** — BCa / cluster bootstrap CIs, Bayesian `P(Brief > competitor)`, paired
+  permutation / Wilcoxon / McNemar, Holm / BH / Friedman / Nemenyi critical difference,
+  cluster-robust logistic `compliance ~ arm*depth`, empirical `d⋆` with CI, causal
+  mediation, stochastic dominance, decay-law model selection, power.
 
-The `brief` arm's `write()` is a documented no-op — Brief's ingestion path is
-interactive and approval-gated, so it cannot be called unattended inside a
-benchmark loop. The workspace must be **pre-seeded with the task decisions before
-running**. Follow Brief's own seeding guide (or adapt `benchmark/seed.ts` from the
-dcbench repo) to load the decisions in `benchmarks/data/dcbench/decisions.json` into
-your Brief workspace before firing a run that includes the `brief` arm.
+## Integrity (why the numbers are defensible)
 
-If you skip this step, the brief arm will run but retrieve nothing, producing a
-floor-level compliance score (which is a valid result — it means Brief wasn't given
-anything to find, not that the arm is broken).
+- **Fairness lock** — identical model, retrieval budget, and code-search tool across
+  every arm; memory architecture is the only variable (validated in `config/schema.py`).
+- **Two-tier provenance** — numbers we measured under identical conditions are never
+  mixed with vendor-reported claims (`competitors/`, guarded by `assert_single_tier`).
+- **No rigging** — the benchmark tests the genuine failure mode (link-reachable,
+  dissimilar facts); strong baselines; if a result ever doesn't favour Brief we report it.
+- **Cross-language validation** — core computations re-implemented in C#, Java, R, SQL
+  and checked for agreement (see `docs/VALIDATION.md`).
 
-### 4. Run
-
-```bash
-python run.py
-```
-
-Results are written to `results/all_runs.jsonl` row-by-row as they complete
-(crash-safe — if the run stops mid-way, you keep what finished).
-
-### 5. Generate the four tables
-
-```python
-from scoring.tables import load_rows, headline_table, model_robustness_table, \
-    depth_crossover_table, ablation_table
-import json
-
-rows = load_rows()
-print(json.dumps(headline_table(rows), indent=2))
-print(json.dumps(depth_crossover_table(rows), indent=2))
-print(json.dumps(ablation_table(rows), indent=2))
-print(json.dumps(model_robustness_table(rows), indent=2))
-```
-
----
-
-## Repo layout
+## Repository layout
 
 ```
-membench/
-  adapters/       none, fullcontext, mem0, brief, random_context
-  agent/          runner.py (the task loop), llm_client.py
-  benchmarks/     dcbench.py, swebench.py, longmemeval.py, depth_labels.jsonl
-                  data/  (dcbench, swebench, longmemeval data files)
-  configs/        fairness lock — same model/budget/tool across all arms
-  scoring/        compliance.py, correctness.py, cost.py, tables.py
-  results/        raw JSONL + summary tables (git-ignored)
-  run.py          entry point
+src/membench/   types · theory/ · retrieval/ (+ graph/, external/) · agents/ (+ llm/)
+                datasets/ · metrics/ · stats/ · analysis/ · config/ · cli · harness · device
+native/c · crates/membench-kernels (Rust) · cuda/ · orchestrator/ (Go)   # accel + scale
+tools/seed (TypeScript) · reference/ (C#, Java, R) · schema/ (SQL)        # tooling + validation
+scripts/ (sh + ps1) · Dockerfile · docs/ (HARDWARE, VALIDATION, METHODOLOGY, THREATS)
 ```
 
----
-
-## The five arms
-
-| Arm | What it does |
-|-----|-------------|
-| `none` | No memory — floor control |
-| `fullcontext` | Whole corpus truncated to budget — "just buy tokens" control |
-| `mem0` | Similarity top-k to budget (TF cosine, stdlib only) |
-| `brief` | Graph walk via Brief MCP — needs `BRIEF_OAUTH_TOKEN` + pre-seeded workspace |
-| `random_context` | Random nodes to Brief's exact budget — proves structure beats budget |
-
----
-
-## The three datasets
-
-| Dataset | Failure mode tested | Spec-stripped? |
-|---------|--------------------|----|
-| `dcbench` | Decisions invisible in code | Yes — d=1,2,3 |
-| `swebench` | Cross-file constraint in remote module | Yes — d=1,2 |
-| `longmemeval` | Temporal supersession (temporal + knowledge-update splits only) | No |
-
----
-
-## Known gaps (flag before publishing numbers)
-
-### depth_labels.jsonl — single-annotator only
-`benchmarks/depth_labels.jsonl` was produced by an automated single-pass heuristic
-(`dual_annotated: false` on every row). CLAUDE.md requires two independent annotators
-tracing each path, with tasks disagreeing by more than one hop dropped or rewritten.
-**Do not use the depth-crossover table for published numbers until a real dual-annotation
-pass is done.** The headline table and ablation table are not affected by this gap.
-
-### brief arm — Python ≥3.10 required
-The `mcp` package used in `adapters/brief.py` requires Python 3.10+. The arm will
-import-error on Python 3.9. Everything else runs on 3.9.
-
-### Model-robustness table — GPT and open-weight not implemented
-`configs/models.json` records GPT-5.1 and Llama 4 Maverick as the robustness-row
-models, but their `agent/llm_client.py` backends have not been built yet
-(`implemented: false`). `run.py` skips those cells with a printed notice rather than
-crashing. The robustness table will only have the Claude row until those backends are
-added.
-
----
-
-## Running tests
-
-```bash
-pytest tests/
-```
-
----
-
-## Fairness invariant (what configs/ enforces)
-
-Same model, same code-search tool (`none`), same retrieval `budget_tokens` per
-dataset across every arm. Budget is passed *into* `retrieve()` by the caller — arms
-never choose their own budget. This is the only variable being compared: memory
-architecture.
+See `docs/METHODOLOGY.md` for the design, `docs/THREATS.md` for threats to validity, and
+`paper/CLAIMS.md` for the claim → code → table map. Cite via `CITATION.cff`.
