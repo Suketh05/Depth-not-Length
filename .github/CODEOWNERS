@@ -1,0 +1,12 @@
+# default owners for anything not matched below
+* @Suketh05 @Kasyap3
+
+# the python benchmark and its tests
+/src/ @Suketh05 @Kasyap3
+/tests/ @Suketh05 @Kasyap3
+
+# native kernels and cross language references
+/native/ @Suketh05 @Kasyap3
+/crates/ @Suketh05 @Kasyap3
+/cuda/ @Suketh05 @Kasyap3
+/reference/ @Suketh05 @Kasyap3
