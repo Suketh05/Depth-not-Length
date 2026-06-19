@@ -60,8 +60,8 @@ leadership, not a head-to-head crown on a shared benchmark (none exists yet).
    mid-pack toward top-3 on accuracy too.
 
 **Honest caveat (load-bearing):** on **raw retrieval accuracy** in our swebench proxy Brief is
-currently **mid-pack** (~0.33 vs best baseline 0.37), and the SWE-ContextBench projection
-places Brief ~4th. So **"top-3" is earned on architecture + capability + token-efficiency +
+currently **mid-pack** (~0.33 vs best baseline 0.37), and our swebench proxy
+places Brief mid-pack (~4th on raw accuracy). So **"top-3" is earned on architecture + capability + token-efficiency +
 trajectory — not yet on a measured raw-accuracy ranking.** A measured top-3-accuracy claim
 requires running the official harness (and likely the retrieval tuning we have started).
 
