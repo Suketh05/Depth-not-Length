@@ -1,0 +1,6 @@
+system,resolution_rate_pct,token_cost,tier,note
+Oracle Summary Learning (upper bound),34.34,6.66,vendor/paper,arXiv:2602.08316
+Supermemory,30.3,5.04,vendor (self-reported),arXiv:2602.08316
+OpenViking,29.2,4.2,vendor,arXiv:2602.08316
+Mem0,24.24,4.72,vendor,arXiv:2602.08316
+Brief (PROJECTED),27.0,4.3,projected,NOT measured; range 24.0-31.0%; anchored to our proxy + paper
