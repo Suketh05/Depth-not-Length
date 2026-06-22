@@ -8,3 +8,5 @@ tables 101-102, figures 101-102. n=80 2-hop questions; graph arm uses entity-men
 | table | 102 | HotpotQA | HotpotQA support-fact recall (both gold passages retrieved) | multi-hop IR | measured-offline | T102_hotpotqa_sfrecall.md |
 | figure | 101 | HotpotQA | HotpotQA support-fact recall bar | multi-hop IR | measured-offline | F101_hotpotqa_sfrecall.png |
 | figure | 102 | HotpotQA | HotpotQA multi-metric bars | multi-hop IR | measured-offline | F102_hotpotqa_metrics.png |
+| table | 103 | M | Brief vs Mem0 COMPLETE head-to-head | head-to-head | measured | T103_brief_vs_mem0.md |
+| figure | 103 | M | Brief vs Mem0 depth curves | head-to-head curve | measured | F103_brief_vs_mem0.png |
