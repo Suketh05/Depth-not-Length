@@ -55,7 +55,27 @@ class Mem0Memory(KeyedExternalAdapter):
                     "Mem0 adapter needs the mem0ai package in an isolated env: "
                     "uv pip install -r competitors/envs/mem0.txt"
                 ) from exc
-            self._client = Memory()
+            import tempfile
+
+            # Unique on-disk vector store per instance: Mem0's default Qdrant path is
+            # shared and not concurrency-safe (fresh arm per task + parallel workers
+            # collide on one folder), so isolate each client's store.
+            self._client = Memory.from_config(
+                {
+                    "llm": {
+                        "provider": "openai",
+                        "config": {"model": "gpt-4o-mini", "temperature": 0.1},
+                    },
+                    "embedder": {
+                        "provider": "openai",
+                        "config": {"model": "text-embedding-3-small"},
+                    },
+                    "vector_store": {
+                        "provider": "qdrant",
+                        "config": {"path": tempfile.mkdtemp(prefix="mem0_qdrant_")},
+                    },
+                }
+            )
         return self._client
 
     def _backend_add(self, item_id: str, text: str) -> str:
@@ -63,7 +83,7 @@ class Mem0Memory(KeyedExternalAdapter):
         return item_id  # we key by our own id via Mem0 metadata
 
     def _backend_search(self, query: str, k: int) -> list[str]:
-        result = self._ensure_client().search(query, user_id=self._user_id, limit=k)
+        result = self._ensure_client().search(query, filters={"user_id": self._user_id}, limit=k)
         rows = result.get("results", result) if isinstance(result, dict) else result
         ids: list[str] = []
         for row in rows:
