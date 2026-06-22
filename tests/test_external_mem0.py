@@ -23,7 +23,7 @@ class FakeMem0:
     def add(self, text: str, user_id: str, metadata: dict[str, object]) -> None:
         self.rows.append({"memory": text, "metadata": metadata})
 
-    def search(self, query: str, user_id: str, limit: int) -> dict[str, object]:
+    def search(self, query: str, filters: dict[str, object], limit: int) -> dict[str, object]:
         q = set(_TOK.findall(query.lower()))
 
         def overlap(row: dict[str, object]) -> int:
