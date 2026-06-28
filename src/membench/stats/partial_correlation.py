@@ -199,7 +199,7 @@ def partial_correlation(
     if np.any(matrix.std(axis=0) == 0):
         raise ValueError("every variable must have non-zero variance")
 
-    corr = np.corrcoef(matrix, rowvar=False)
+    corr = np.corrcoef(matrix, rowvar=False).astype(np.float64)
     partial = float(partial_correlation_matrix(corr)[0, 1])
 
     # Semipartial: covariates removed from x only -> corr(y, residual of x on Z).
