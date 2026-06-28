@@ -182,6 +182,10 @@ class SpladeLiteMemory(MemorySystem):
             return RetrievedContext.empty()
         query_vec = self.sparse_vector(query)
         scores = [_sparse_dot(query_vec, doc_vec) for doc_vec in self._doc_vectors]
-        order = sorted(range(len(self._items)), key=lambda i: (-scores[i], i))
+        # Round the score in the sort key so mathematically-tied documents whose
+        # dot products differ only by floating-point round-off (BLAS/NumPy summation
+        # order varies across platforms/Python versions) collapse to an exact tie and
+        # are broken deterministically by corpus index ``i``.
+        order = sorted(range(len(self._items)), key=lambda i: (-round(scores[i], 12), i))
         ranked = [(self._items[i].item_id, self._items[i].text) for i in order]
         return pack_to_budget(ranked, budget_tokens)
