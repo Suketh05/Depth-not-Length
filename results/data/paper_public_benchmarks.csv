@@ -1,0 +1,8 @@
+benchmark,metric,brief,next_best_system,next_best_value
+LoCoMo,LLM-judge accuracy (%),87.6,RAPTOR,84.7
+DMR,fact F1 (%),94.2,Kluris,87.0
+SWE-ContextBench,task resolution (%),47.3,Unabyss,37.6
+HotpotQA,recall@5,0.783,Mem0,0.667
+HotpotQA,nDCG@10,0.987,Oracle Summary,0.928
+HotpotQA,MRR,0.981,Supermemory,0.972
+HotpotQA,supporting-fact recall,0.503,Zep,0.529

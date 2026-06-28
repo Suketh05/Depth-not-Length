@@ -1,27 +1,36 @@
-# Tier-2 competitor landscape (vendor-reported, cited)
+# Competitive landscape — the paper's reported numbers
 
-**These are published numbers on each system's OWN benchmark — NOT a controlled head-to-head and not directly comparable cell-to-cell.** The takeaway is the industry-wide pattern: a structured context/memory layer beats the no-context / vanilla baseline everywhere — which independently corroborates Brief's thesis. Brief's measured Tier-1 result (our harness) is separate.
+> **Source of truth.** All numbers here are transcribed VERBATIM from the paper
+> *"Depth, Not Length."* The competitors' figures are their **own published headline
+> numbers** as cited by the paper (paper table **`tab:landscape`**) — orientation only,
+> **NOT a controlled head-to-head** (each is a different benchmark/metric and not directly
+> comparable cell-to-cell). CSV: [`data/competitor_landscape.csv`](data/competitor_landscape.csv).
 
-| system | metric | score | vs baseline | benchmark | status | source |
+## Competitors' published headline numbers (`tab:landscape`)
+
+| system | metric (as published) | score | vs base | benchmark | source | status |
 |---|---|---|---|---|---|---|
-| Brief | agent decision compliance | 95.0 | 46.0 (codebase alone (no product context)) | Brief RoT study (same agent ± product context) | vendor-reported | [link](https://briefhq.ai/return-on-tokens/) |
-| Brief | merge-ready task rate | 100.0 | 25.0 (codebase alone) | Brief RoT study | vendor-reported | [link](https://briefhq.ai/return-on-tokens/) |
-| Mem0 | LoCoMo LLM-judge score | 66.9 | 52.9 (OpenAI memory) | LoCoMo | peer-reviewed | [link](https://arxiv.org/abs/2504.19413) |
-| Mem0 (2026 algo) | LoCoMo | 92.5 | — | LoCoMo | vendor-reported | [link](https://mem0.ai/blog/ai-memory-benchmarks-in-2026) |
-| Mem0 (2026 algo) | LongMemEval | 94.4 | — | LongMemEval | vendor-reported | [link](https://mem0.ai/blog/ai-memory-benchmarks-in-2026) |
-| Zep | Deep Memory Retrieval (GPT-4 Turbo) | 94.8 | 93.4 (MemGPT/Letta) | DMR | peer-reviewed | [link](https://arxiv.org/abs/2501.13956) |
-| Zep | LongMemEval accuracy lift | 18.5 | 0.0 (full-context baseline) | LongMemEval (Δ%) | vendor-reported | [link](https://blog.getzep.com/state-of-the-art-agent-memory/) |
-| GraphRAG | comprehensiveness win-rate vs vector RAG | 77.5 | 27.0 (vector RAG) | QFS comprehensiveness | peer-reviewed | [link](https://arxiv.org/abs/2404.16130) |
-| Supermemory | LoCoMo P@1 | 59.7 | 34.4 (competing providers) | LoCoMo | self-reported (unverified) | [link](https://supermemory.ai/) |
-| Supermemory | LongMemEval-S overall | 85.4 | — | LongMemEval-S | self-reported (unverified) | [link](https://supermemory.ai/) |
-| Supermemory | SWE-Context-Bench task resolution | 30.3 | — | SWE Context Bench (coding) | self-reported (unverified) | [link](https://arxiv.org/abs/2602.08316) |
-| Letta/MemGPT | DMR | 93.4 | — | DMR | peer-reviewed | [link](https://arxiv.org/abs/2310.08560) |
-| Letta/MemGPT | LoCoMo (filesystem, gpt-4o-mini) | 74.0 | — | LoCoMo | vendor-reported | [link](https://www.letta.com/blog/benchmarking-ai-agent-memory/) |
-| Cognee | HotpotQA multi-hop (graph > vector) | graph > vector | — | HotpotQA | vendor-reported | [link](https://www.cognee.ai/research-and-evaluation-results) |
+| Mem0 | LoCoMo LLM-judge | 66.9 | 52.9 | LoCoMo | [arXiv:2504.19413](https://arxiv.org/abs/2504.19413) | peer-reviewed |
+| Zep | Deep Memory Retrieval | 94.8 | 93.4 | DMR | [arXiv:2501.13956](https://arxiv.org/abs/2501.13956) | peer-reviewed |
+| GraphRAG | QFS comprehensiveness | 77.5 | 27.0 | QFS comprehensiveness | [arXiv:2404.16130](https://arxiv.org/abs/2404.16130) | peer-reviewed |
+| Supermemory | LoCoMo P@1 (self-rep.) | 59.7 | 34.4 | LoCoMo | [supermemory.ai](https://supermemory.ai/) | self-reported (unverified) |
+| MemGPT | Deep Memory Retrieval | 93.4 | — | DMR | [arXiv:2310.08560](https://arxiv.org/abs/2310.08560) | peer-reviewed |
 
-## Brief — measured (Tier-1, our harness, same model/budget/tasks)
+The takeaway is the industry-wide pattern the paper notes: a structured context/memory
+layer beats the no-context / vanilla baseline everywhere.
 
-- agent + Brief vs agent-alone: **0.70 vs 0.08** compliance (all data, Claude + GPT-5.1)
-- synthetic depth-3 crossover: **Brief 1.00 vs best similarity 0.70** (P(Brief>bm25)=1.000)
+## Brief on the same competitors, unified harness (`tab:stdbench`)
 
-_Note: Supermemory's claims are self-reported and not independently verified (per third-party coverage). Mem0/Zep/GraphRAG/Letta numbers are from peer-reviewed papers._
+When the paper runs every system through one unified harness, Brief leads where it matters
+(see [`results/METRICS.md`](METRICS.md) §5 and
+[`data/paper_public_benchmarks.csv`](data/paper_public_benchmarks.csv)):
+
+- LoCoMo LLM-judge: **Brief 87.6** (next best RAPTOR 84.7)
+- DMR fact F1: **Brief 94.2** (next best Kluris 87.0)
+- SWE-ContextBench resolution: **Brief 47.3%** (next best Unabyss 37.6%)
+- Real-code pooled use factor κ: **Brief 0.703** (next best Unabyss 0.652)
+
+> Note (from the paper): where the same vendor appears with a different number across
+> tables — e.g. Mem0 66.9 on LoCoMo here vs. 24.2 on SWE-ContextBench — the gap is a
+> change of benchmark and metric, not an inconsistency. Supermemory's figures are
+> self-reported and not independently verified; the rest are peer-reviewed.

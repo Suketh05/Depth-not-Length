@@ -1,0 +1,7 @@
+arm,compliance
+brief,0.933
+tfidf,0.883
+bm25,0.875
+dense,0.858
+raptor,0.817
+none,0.025

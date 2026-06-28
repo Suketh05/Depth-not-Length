@@ -1,0 +1,10 @@
+arm_or_group,slope_or_gap,note
+brief,-0.075,compliance slope comply(d3)-comply(d1) synthetic Claude (least decay)
+bm25,-0.150,compliance slope comply(d3)-comply(d1) synthetic Claude
+tfidf,-0.125,compliance slope comply(d3)-comply(d1) synthetic Claude
+dense,-0.175,compliance slope comply(d3)-comply(d1) synthetic Claude
+hybrid_rrf,-0.150,compliance slope comply(d3)-comply(d1) synthetic Claude
+rerank_ce,-0.200,compliance slope comply(d3)-comply(d1) synthetic Claude
+brief_minus_best_similarity@d1,+0.025,Brief compliance minus best similarity arm at depth d=1
+brief_minus_best_similarity@d2,+0.025,Brief compliance minus best similarity arm at depth d=2
+brief_minus_best_similarity@d3,+0.075,Brief compliance minus best similarity arm at depth d=3

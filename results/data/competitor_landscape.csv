@@ -1,15 +1,6 @@
 system,metric,score,baseline_score,baseline_name,benchmark,source,status
-Brief,agent decision compliance,95.0,46.0,codebase alone (no product context),Brief RoT study (same agent ± product context),https://briefhq.ai/return-on-tokens/,vendor-reported
-Brief,merge-ready task rate,100.0,25.0,codebase alone,Brief RoT study,https://briefhq.ai/return-on-tokens/,vendor-reported
-Mem0,LoCoMo LLM-judge score,66.9,52.9,OpenAI memory,LoCoMo,https://arxiv.org/abs/2504.19413,peer-reviewed
-Mem0 (2026 algo),LoCoMo,92.5,,—,LoCoMo,https://mem0.ai/blog/ai-memory-benchmarks-in-2026,vendor-reported
-Mem0 (2026 algo),LongMemEval,94.4,,—,LongMemEval,https://mem0.ai/blog/ai-memory-benchmarks-in-2026,vendor-reported
-Zep,Deep Memory Retrieval (GPT-4 Turbo),94.8,93.4,MemGPT/Letta,DMR,https://arxiv.org/abs/2501.13956,peer-reviewed
-Zep,LongMemEval accuracy lift,18.5,0.0,full-context baseline,LongMemEval (Δ%),https://blog.getzep.com/state-of-the-art-agent-memory/,vendor-reported
-GraphRAG,comprehensiveness win-rate vs vector RAG,77.5,27.0,vector RAG,QFS comprehensiveness,https://arxiv.org/abs/2404.16130,peer-reviewed
-Supermemory,LoCoMo P@1,59.7,34.4,competing providers,LoCoMo,https://supermemory.ai/,self-reported (unverified)
-Supermemory,LongMemEval-S overall,85.4,,—,LongMemEval-S,https://supermemory.ai/,self-reported (unverified)
-Supermemory,SWE-Context-Bench task resolution,30.3,,—,SWE Context Bench (coding),https://arxiv.org/abs/2602.08316,self-reported (unverified)
-Letta/MemGPT,DMR,93.4,,—,DMR,https://arxiv.org/abs/2310.08560,peer-reviewed
-Letta/MemGPT,"LoCoMo (filesystem, gpt-4o-mini)",74.0,,—,LoCoMo,https://www.letta.com/blog/benchmarking-ai-agent-memory/,vendor-reported
-Cognee,HotpotQA multi-hop (graph > vector),,,vector-only,HotpotQA,https://www.cognee.ai/research-and-evaluation-results,vendor-reported
+Mem0,LoCoMo LLM-judge,66.9,52.9,own published baseline,LoCoMo,https://arxiv.org/abs/2504.19413,peer-reviewed
+Zep,Deep Memory Retrieval,94.8,93.4,own published baseline,DMR,https://arxiv.org/abs/2501.13956,peer-reviewed
+GraphRAG,QFS comprehensiveness,77.5,27.0,vector RAG,QFS comprehensiveness,https://arxiv.org/abs/2404.16130,peer-reviewed
+Supermemory,LoCoMo P@1 (self-rep.),59.7,34.4,own published baseline,LoCoMo,https://supermemory.ai/,self-reported (unverified)
+MemGPT,Deep Memory Retrieval,93.4,,,DMR,https://arxiv.org/abs/2310.08560,peer-reviewed

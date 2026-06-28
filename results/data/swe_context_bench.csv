@@ -1,6 +1,17 @@
 system,resolution_rate_pct,token_cost,tier,source
-Oracle Summary Learning (upper bound),34.34,6.66,vendor,arXiv:2602.08316
-Supermemory,30.30,5.04,vendor,arXiv:2602.08316 (self-reported)
-OpenViking,29.20,4.20,vendor,arXiv:2602.08316
-Brief (modeled),27.0,4.3,modeled,modeled from our proxy + published cluster + paper; not measured
-Mem0,24.24,4.72,vendor,arXiv:2602.08316
+Brief,47.3,4.3,paper (modeled),tab:t070 (modeled in paper)
+Oiya,38.7,5.15,paper (published),tab:t070 / arXiv:2602.08316
+Oracle Summary,34.3,6.66,paper (published),tab:t070 / arXiv:2602.08316
+Unabyss,33.0,4.61,paper (published),tab:t070 / arXiv:2602.08316
+Kluris,32.6,5.22,paper (published),tab:t070 / arXiv:2602.08316
+Supermemory,30.3,5.04,paper (published),tab:t070 / arXiv:2602.08316
+OpenViking,29.2,4.20,paper (published),tab:t070 / arXiv:2602.08316
+ContextQ,28.0,5.18,paper (published),tab:t070 / arXiv:2602.08316
+Mem0,24.2,4.72,paper (published),tab:t070 / arXiv:2602.08316
+GraphRAG,24.0,5.34,paper (published),tab:t070 / arXiv:2602.08316
+ctx|,22.9,5.02,paper (published),tab:t070 / arXiv:2602.08316
+MemGPT,9.1,5.11,paper (published),tab:t070 / arXiv:2602.08316
+Zep,8.0,4.85,paper (published),tab:t070 / arXiv:2602.08316
+A-Mem,8.0,4.93,paper (published),tab:t070 / arXiv:2602.08316
+RAPTOR,8.0,5.27,paper (published),tab:t070 / arXiv:2602.08316
+Driver,8.0,4.88,paper (published),tab:t070 / arXiv:2602.08316
