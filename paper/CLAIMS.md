@@ -4,7 +4,7 @@ Every claim in the paper traces to code and to a regenerable artifact.
 
 | Claim | Code | Artifact |
 |---|---|---|
-| Similarity recovery has a depth ceiling `ρ^{d(d+1)/2}` | `theory/recovery.py` | derivation + `theory` tests |
+| Similarity recovery has a depth ceiling `s_0^d·ρ^{d(d+1)/2}` | `theory/recovery.py` | derivation + `theory` tests |
 | Structured recovery `q^d` decays gently; advantage → ∞ | `theory/recovery.py` | `RecoveryModel` tests |
 | A crossover depth `d⋆` exists | `theory/crossover.py` | `membench theory` |
 | `s_i = s0·ρ^i` holds on real embeddings | `analysis/decay_fit.py` | decay-fit figure |
