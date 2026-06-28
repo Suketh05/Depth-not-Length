@@ -1,105 +1,105 @@
-# PLAN — 50 independent PRs to harden BriefBench (`membench`)
+# PLAN — 50 research-grade, core-codebase PRs for BriefBench (`membench`)
 
-This is the live checklist for taking the repository from its current state to a polished,
-reproducible, well-documented project, delivered as **exactly 50 substantial pull requests**,
-each branched **independently off `main`**.
+Live checklist for taking the repository forward as **exactly 50 substantial pull requests**,
+each branched **independently off `main`**. Every PR adds *real research/engineering value to the
+core codebase* — a new retrieval method, statistical estimator, theory model, metric, dataset
+generator, or harness internal — implemented to the repo's actual interfaces, with tests that
+assert known closed-form / textbook golden values. **No docs-only or CI-only filler.**
 
 ## Operating rules (enforced for every PR)
 
 - **Branch fresh off main:** `git switch main && git fetch origin && git reset --hard origin/main`
-  then `git switch -c <type>/<slug>`. No stacked/dependent branches.
-- **File-disjoint by construction:** the work is **additive-first** — most PRs add *new* files
-  that no other PR touches. Each shared file (`README.md`, `CHANGELOG.md`, `pyproject.toml`,
-  `src/membench/cli.py`) is edited by **exactly one** PR. Result: any merge order applies with
-  zero/near-zero conflicts.
-- **Green & validated:** every PR passes the repo's own gates before it opens. Python-touching
-  PRs run `uv run ruff check`, `uv run mypy src`, and the relevant `uv run pytest`; docs/CI PRs
-  validate markdown/YAML. Baseline on `main`: **487 passed, 7 skipped** (native/Rust kernels
-  unbuilt), build green.
-- **Integrity guardrail:** no benchmark number is invented, estimated, or reconstructed. Every
-  metric in docs is copied **verbatim** from the paper (`/Users/kasyapvaranasi/Desktop/v1/depth_not_length_FIXED.tex`)
-  or from committed result files (`results/data/*.csv`, `results/*.md`, `paper/measured/`). The
-  measured / modeled / vendor provenance tiering is preserved.
-- **Behavior-preserving** unless a PR explicitly states otherwise and ships tests for the new
-  behavior. `main` stays green; no force-push to `main`; **the 50 PRs are left OPEN** for the
-  maintainer to merge.
-- **Labels:** apply existing repo labels (`documentation`, `enhancement`, `github_actions`,
-  `bug`, `dependencies`, `rust`, `javascript`). PR #32 adds a path-based auto-labeler.
-
-## Status legend
+  then `git switch -c <type>/<slug>`. Independent, non-stacked branches.
+- **File-disjoint by construction:** every PR adds *new* modules + *new* test files that no other
+  PR touches. The only edits to existing shared files are `src/membench/harness.py` (PR #47 only)
+  and `src/membench/cli.py` (PR #49 only) — each owned by exactly one PR. Any merge order applies
+  with zero/near-zero conflicts.
+- **Conforms to real interfaces** (verified): retrieval arms subclass `MemorySystem(ABC)`
+  (`write`, `retrieve(query, budget_tokens) -> RetrievedContext`), are registered with
+  `@register_arm(...)`, pack with `pack_to_budget`, and run through `run_benchmark(arms=[name...])`;
+  stats/theory return bare `float` or frozen `@dataclass(slots=True)`; `Config` is pydantic. New
+  arms/datasets are exercised end-to-end through the real harness in their tests (importing the
+  module triggers registration — no edit to `builtin.py`/`harness.py` required).
+- **Correctness bar:** each algorithm is the standard, cited form; the module carries NumPy-style
+  docstrings (ruff `D`/`NPY` families) and full type hints (mypy `strict`). Tests assert a
+  hand-computed / textbook golden value **and** invariants. No fabricated benchmark numbers.
+- **Green gate before opening:** `uv run ruff check <files>`, `uv run ruff format --check <files>`,
+  `uv run mypy src`, `uv run pytest <new test file>` — all pass. Baseline on `main`:
+  **487 passed, 7 skipped**.
+- **Behavior-preserving:** new modules are additive (off by default); existing results/defaults are
+  never changed. The 50 PRs are left **OPEN** for the maintainer. No force-push to `main`.
 
 `[ ]` not opened · `[x]` PR open & green
 
 ---
 
-## PR #1 — this plan
-- [ ] **1.** `docs: add PLAN.md (50-PR roadmap & checklist)` — *documentation* — files: `PLAN.md`
+## PR #1 — roadmap
+- [x] **1.** `docs: PLAN.md (this roadmap)` — `PLAN.md`
 
-## Documentation — new files (each a distinct topic, paper-grounded)
-- [ ] **2.** `docs: glossary of core terms` — *documentation* — `docs/GLOSSARY.md` (depth, κ/use-factor, supersession, P_comply=P_ret·κ, d⋆, arms)
-- [ ] **3.** `docs: architecture overview with mermaid diagrams` — *documentation* — `docs/ARCHITECTURE.md`
-- [ ] **4.** `docs: reproduce-the-paper map (figures/tables → commands)` — *documentation* — `docs/REPRODUCE.md`
-- [ ] **5.** `docs: theory derivation walkthrough` — *documentation* — `docs/THEORY.md`
-- [ ] **6.** `docs: statistics menu explained` — *documentation* — `docs/STATISTICS.md`
-- [ ] **7.** `docs: retrieval-arms catalog (22 arms)` — *documentation* — `docs/RETRIEVAL_ARMS.md`
-- [ ] **8.** `docs: provenance tiers (measured/modeled/vendor)` — *documentation* — `docs/PROVENANCE.md`
-- [ ] **9.** `docs: FAQ` — *documentation* — `docs/FAQ.md`
-- [ ] **10.** `docs: DC-bench dataset deep-dive` — *documentation* — `docs/benchmarks/DCBENCH.md`
-- [ ] **11.** `docs: SWE-bench dataset deep-dive` — *documentation* — `docs/benchmarks/SWEBENCH.md`
-- [ ] **12.** `docs: LongMemEval dataset deep-dive` — *documentation* — `docs/benchmarks/LONGMEMEVAL.md`
-- [ ] **13.** `docs: synthetic depth-crossover suite deep-dive` — *documentation* — `docs/benchmarks/SYNTHETIC.md`
-- [ ] **14.** `docs: verbatim headline results from the paper` — *documentation* — `docs/RESULTS.md`
-- [ ] **15.** `docs: competitor landscape (cited, two-tier)` — *documentation* — `docs/COMPETITORS.md`
-- [ ] **16.** `docs: full CLI reference (all subcommands & flags)` — *documentation* — `docs/CLI.md`
-- [ ] **17.** `docs: data-format reference (rows.jsonl / manifest / CSV schemas)` — *documentation* — `docs/DATA_FORMAT.md`
+## Retrieval methods — new arms conforming to `MemorySystem` + `@register_arm` (tested through `run_benchmark`)
+- [ ] **2.** `feat(retrieval): MMR diversity reranker (Carbonell & Goldstein 1998)` — `retrieval/mmr.py` + `tests/test_mmr.py`
+- [ ] **3.** `feat(retrieval): CombSUM/CombMNZ/CombANZ score fusion (Fox & Shaw 1994)` — `retrieval/fusion.py` + `tests/test_fusion.py`
+- [ ] **4.** `feat(retrieval): RM3 / Rocchio pseudo-relevance feedback expansion` — `retrieval/rm3.py` + `tests/test_rm3.py`
+- [ ] **5.** `feat(retrieval): fielded BM25F (Robertson et al.)` — `retrieval/bm25f.py` + `tests/test_bm25f.py`
+- [ ] **6.** `feat(retrieval): BM25+ lower-bounded TF (Lv & Zhai 2011)` — `retrieval/bm25_plus.py` + `tests/test_bm25_plus.py`
+- [ ] **7.** `feat(retrieval): query-likelihood LM, Dirichlet & Jelinek-Mercer (Zhai & Lafferty)` — `retrieval/lmdir.py` + `tests/test_lmdir.py`
+- [ ] **8.** `feat(retrieval): ColBERT-style late-interaction MaxSim (offline)` — `retrieval/colbert_lite.py` + `tests/test_colbert_lite.py`
+- [ ] **9.** `feat(retrieval): deterministic learned-sparse term expansion (SPLADE-style)` — `retrieval/splade_lite.py` + `tests/test_splade_lite.py`
+- [ ] **10.** `feat(retrieval): personalized PageRank over the typed graph (similarity-seeded)` — `retrieval/ppr.py` + `tests/test_ppr.py`
+- [ ] **11.** `feat(retrieval): spreading activation over the context graph` — `retrieval/spreading_activation.py` + `tests/test_spreading_activation.py`
+- [ ] **12.** `feat(retrieval): content-addressed LRU cache wrapper for a MemorySystem` — `retrieval/cache.py` + `tests/test_retrieval_cache.py`
+- [ ] **13.** `feat(retrieval): RRF fusing similarity ranks with graph-hop ranks` — `retrieval/rank_fusion_graph.py` + `tests/test_rank_fusion_graph.py`
 
-## Tests — new files (target real coverage gaps, not duplicate unit tests)
-- [ ] **18.** `test: results-integrity (docs numbers == committed CSV/data)` — *enhancement* — `tests/test_results_integrity.py`
-- [ ] **19.** `test: property-based theory invariants (Hypothesis)` — *enhancement* — `tests/test_property_theory.py`
-- [ ] **20.** `test: property-based statistics invariants (Hypothesis)` — *enhancement* — `tests/test_property_stats.py`
-- [ ] **21.** `test: CLI golden/smoke across all subcommands` — *enhancement* — `tests/test_cli_golden.py`
-- [ ] **22.** `test: run determinism (same seed → identical rows)` — *enhancement* — `tests/test_determinism_seed.py`
-- [ ] **23.** `test: compliance factorization identity P_comply=P_ret·κ` — *enhancement* — `tests/test_factorization_identity.py`
-- [ ] **24.** `test: fairness-lock config validation (equal budget across arms)` — *enhancement* — `tests/test_fairness_lock_config.py`
-- [ ] **25.** `test: provenance single-tier guard (no measured/vendor mixing)` — *enhancement* — `tests/test_provenance_tiers.py`
-- [ ] **26.** `test: figure inventory (referenced figures exist on disk)` — *enhancement* — `tests/test_figure_inventory.py`
-- [ ] **27.** `test: cross-language golden agreement (nDCG/BM25)` — *enhancement* — `tests/test_xlang_reference_golden.py`
+## Statistics — new estimators (conforming return types) + tests with golden values
+- [ ] **14.** `feat(stats): TOST equivalence testing (Schuirmann)` — `stats/equivalence.py` + `tests/test_stats_equivalence.py`
+- [ ] **15.** `feat(stats): DerSimonian-Laird random-effects meta-analysis (+ I², Q)` — `stats/meta_analysis.py` + `tests/test_stats_meta_analysis.py`
+- [ ] **16.** `feat(stats): Jeffreys/BIC Bayes factor for proportions` — `stats/bayes_factor.py` + `tests/test_stats_bayes_factor.py`
+- [ ] **17.** `feat(stats): split conformal prediction intervals` — `stats/conformal.py` + `tests/test_stats_conformal.py`
+- [ ] **18.** `feat(stats): always-valid confidence sequence / e-value SPRT` — `stats/sequential.py` + `tests/test_stats_sequential.py`
+- [ ] **19.** `feat(stats): isotonic regression (PAVA) + monotone depth-trend test` — `stats/isotonic.py` + `tests/test_stats_isotonic.py`
+- [ ] **20.** `feat(stats): Storey q-values + Benjamini-Yekutieli FDR` — `stats/fdr_extra.py` + `tests/test_stats_fdr_extra.py`
+- [ ] **21.** `feat(stats): partial & semipartial correlation` — `stats/partial_correlation.py` + `tests/test_stats_partial_correlation.py`
+- [ ] **22.** `feat(stats): aligned rank transform for factorial nonparametrics (Wobbrock 2011)` — `stats/aligned_rank_transform.py` + `tests/test_stats_aligned_rank_transform.py`
+- [ ] **23.** `feat(stats): studentized (bootstrap-t) & subsampling CIs` — `stats/bootstrap_studentized.py` + `tests/test_stats_bootstrap_studentized.py`
+- [ ] **24.** `feat(stats): quantile regression of compliance on depth` — `stats/quantile_regression.py` + `tests/test_stats_quantile_regression.py`
+- [ ] **25.** `feat(stats): g-computation / standardization estimator` — `stats/g_computation.py` + `tests/test_stats_g_computation.py`
 
-## CI / GitHub automation — new workflow & config files
-- [ ] **28.** `ci: CodeQL security scanning` — *github_actions* — `.github/workflows/codeql.yml`
-- [ ] **29.** `ci: markdown link checker` — *github_actions* — `.github/workflows/docs-linkcheck.yml`
-- [ ] **30.** `ci: spell-check (codespell)` — *github_actions* — `.github/workflows/spellcheck.yml`, `.codespellrc`
-- [ ] **31.** `ci: stale issue/PR bot` — *github_actions* — `.github/workflows/stale.yml`
-- [ ] **32.** `ci: path-based PR auto-labeler (+ create test/ci/chore/perf labels)` — *github_actions* — `.github/labeler.yml`, `.github/workflows/labeler.yml`
-- [ ] **33.** `ci: release-drafter` — *github_actions* — `.github/release-drafter.yml`, `.github/workflows/release-drafter.yml`
-- [ ] **34.** `ci: run pre-commit hooks in CI` — *github_actions* — `.github/workflows/pre-commit.yml`
-- [ ] **35.** `chore: benchmark-result issue template` — *documentation* — `.github/ISSUE_TEMPLATE/benchmark_result.md`
-- [ ] **36.** `ci: figures smoke-render workflow` — *github_actions* — `.github/workflows/figures-smoke.yml`
-- [ ] **37.** `ci: shellcheck for shell scripts` — *github_actions* — `.github/workflows/shellcheck.yml`
+## Theory — new models extending the depth/recovery framework + tests
+- [ ] **26.** `feat(theory): closed-form bounds & monotone win-window for d⋆` — `theory/bounds.py` + `tests/test_theory_bounds.py`
+- [ ] **27.** `feat(theory): Fano / channel-capacity context-free floor` — `theory/capacity.py` + `tests/test_theory_capacity.py`
+- [ ] **28.** `feat(theory): scatter-penalty p^σ model` — `theory/scatter.py` + `tests/test_theory_scatter.py`
+- [ ] **29.** `feat(theory): sensitivity / elasticity of recovery & d⋆ wrt (s0,ρ,q)` — `theory/sensitivity.py` + `tests/test_theory_sensitivity.py`
+- [ ] **30.** `feat(theory): supersession-edge recovery model` — `theory/supersession.py` + `tests/test_theory_supersession.py`
+- [ ] **31.** `feat(theory): multi-hop decay composition algebra` — `theory/composition.py` + `tests/test_theory_composition.py`
 
-## Tooling / scripts / config — new files
-- [ ] **38.** `feat: standalone results-integrity checker script` — *enhancement* — `scripts/check_integrity.py`
-- [ ] **39.** `feat: machine-readable results.json exporter` — *enhancement* — `scripts/export_results_json.py`
-- [ ] **40.** `feat: Okabe-Ito colorblind palette module + tests` — *enhancement* — `src/membench/analysis/palette.py`, `tests/test_palette.py`
-- [ ] **41.** `build: conda environment.yml` — *enhancement* — `environment.yml`
-- [ ] **42.** `feat: data-manifest checksum generator + SHA256SUMS` — *enhancement* — `scripts/make_manifest.py`, `results/data/SHA256SUMS`
-- [ ] **43.** `docs: contributor development guide` — *documentation* — `docs/DEVELOPMENT.md`
-- [ ] **44.** `feat: documented full-sweep config (+ configs README)` — *enhancement* — `configs/full.yaml`, `configs/README.md`
-- [ ] **45.** `perf: native-vs-python kernel micro-benchmark script` — *enhancement* — `scripts/bench_native.py`
+## Metrics — new scorers (operate on `ScoredRow`/arrays) + tests
+- [ ] **32.** `feat(metrics): explicit P_comply = P_ret · κ factorization scorer (+ κ estimation)` — `metrics/factorization.py` + `tests/test_metrics_factorization.py`
+- [ ] **33.** `feat(metrics): area-under-depth-curve + depth half-life` — `metrics/area_under_depth.py` + `tests/test_metrics_area_under_depth.py`
+- [ ] **34.** `feat(metrics): recency-correct supersession rate` — `metrics/supersession.py` + `tests/test_metrics_supersession.py`
+- [ ] **35.** `feat(metrics): normalized regret vs oracle` — `metrics/regret.py` + `tests/test_metrics_regret.py`
+- [ ] **36.** `feat(metrics): accuracy-cost Pareto frontier + hypervolume` — `metrics/pareto.py` + `tests/test_metrics_pareto.py`
+- [ ] **37.** `feat(metrics): RBP / ERR / MAP / R-precision` — `metrics/ir_extra.py` + `tests/test_metrics_ir_extra.py`
+- [ ] **38.** `feat(metrics): Brier score + Murphy decomposition` — `metrics/brier.py` + `tests/test_metrics_brier.py`
+- [ ] **39.** `feat(metrics): inter-arm agreement (Fleiss' κ, Krippendorff's α)` — `metrics/agreement.py` + `tests/test_metrics_agreement.py`
 
-## Single-owner edits to shared files (each file edited by exactly one PR)
-- [ ] **46.** `docs: README — badges, reproduce-the-paper, verbatim results` — *documentation* — `README.md`
-- [ ] **47.** `docs: CHANGELOG — Unreleased hardening entries` — *documentation* — `CHANGELOG.md`
-- [ ] **48.** `feat: membench verify subcommand (offline integrity check)` — *enhancement* — `src/membench/cli.py`, `tests/test_cli_verify.py`
-- [ ] **49.** `build: pyproject — coverage config + ruff rule expansion` — *enhancement* — `pyproject.toml`
-- [ ] **50.** `docs: citation/DOI metadata (Zenodo) + citing guide` — *documentation* — `.zenodo.json`, `docs/CITING.md`
+## Dataset generators / loaders — produce valid `Task`s, exercised through an arm
+- [ ] **40.** `feat(datasets): HotpotQA multi-hop loader` — `datasets/hotpotqa.py` + `tests/test_hotpotqa.py`
+- [ ] **41.** `feat(datasets): LoCoMo long-memory loader` — `datasets/locomo.py` + `tests/test_locomo.py`
+- [ ] **42.** `feat(datasets): DMR (Deep Memory Retrieval) loader` — `datasets/dmr.py` + `tests/test_dmr.py`
+- [ ] **43.** `feat(datasets): configurable supersession-chain generator` — `datasets/supersession_synth.py` + `tests/test_supersession_synth.py`
+- [ ] **44.** `feat(datasets): distractor-scatter depth generator` — `datasets/scatter_synth.py` + `tests/test_scatter_synth.py`
+- [ ] **45.** `feat(datasets): parametric N-hop reasoning-chain generator` — `datasets/depth_chain.py` + `tests/test_depth_chain.py`
+
+## Core / harness / analysis internals
+- [ ] **46.** `feat(core): centralized determinism/seed context manager` — `membench/seeding.py` + `tests/test_seeding.py`
+- [ ] **47.** `feat(harness): accept ad-hoc arm instances in run_benchmark (additive)` — `src/membench/harness.py` + `tests/test_harness_registry.py`
+- [ ] **48.** `feat(analysis): depth-curve fitting & crossover extraction helpers` — `analysis/effect_curves.py` + `tests/test_analysis_effect_curves.py`
+- [ ] **49.** `feat(cli): frontier subcommand (Pareto / AUDC over a results file, self-contained)` — `src/membench/cli.py` + `tests/test_cli_frontier.py`
+- [ ] **50.** `feat(analysis): parallel sweep runner matching serial output` — `analysis/sweep_parallel.py` + `tests/test_sweep_parallel.py`
 
 ---
 
 ### Prior open PRs (reviewed, left OPEN for the maintainer)
-- **#45** feat/dashboard — *changes needed* (CI red: ruff import-sort + E501; fix is mechanical).
-- **#46** bump actions/setup-dotnet 4→5 — *merge* (CI green; Node24 satisfied by runner).
-- **#47** bump Jimver/cuda-toolkit — *merge* (consumer CUDA job green).
-- **#48** bump @types/node 25→26 in /tools/seed — *merge* (dev-only; typecheck green).
+- **#45** feat/dashboard — *changes needed* (CI red: ruff). **#46/#47/#48** dependabot — *merge* (CI green).
 
-The new 50 branches avoid all paths touched by these PRs.
+The 50 new branches avoid all paths touched by these PRs.
