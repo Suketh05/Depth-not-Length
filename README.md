@@ -280,7 +280,7 @@ src/membench/   types · theory/ · retrieval/ (+ graph/, external/) · agents/
 native/c · crates/ (Rust kernels) · cuda/ · orchestrator/ (Go)            # accel + scale
 tools/ (TypeScript seed) · reference/ (C#, Java, R) · schema/ (SQL)        # tooling + validation
 competitors/ (vendor-claim registry) · configs/ · scripts/ · Dockerfile
-results/ (METRICS, EVALS, FIGURES, data/, figures/) · paper/ (CLAIMS, measured/) · docs/
+results/ (METRICS, EVALS, FIGURES, data/, figures/) · paper/ (CLAIMS, reported/) · docs/
 ```
 
 Architecture & methodology pointers: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) for the
