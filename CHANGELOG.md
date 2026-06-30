@@ -1,11 +1,9 @@
 # changelog
-
 roughly follows [keep a changelog](https://keepachangelog.com). newest first.
 
-## unreleased
+## [unreleased]
 
-added
-
+### added
 - structured graph memory arm (typed links, bounded traversal, per type decay) and the
   depth crossover benchmark it is built to demonstrate
 - the headline arm set plus competitor adapters, four datasets, and the full metrics
@@ -20,8 +18,7 @@ added
 - config driven sweep, a run manifest that records device, versions and git state, and
   a reproduce script for shell and powershell
 
-notes
-
+### notes
 - the four arm ablation reports the offline stub numbers as measured, unrounded. the
   stub is a deliberately weak proxy that compresses compliance, so it corroborates the
   ordering rather than the magnitude. the magnitude lives in the synthetic crossover.
