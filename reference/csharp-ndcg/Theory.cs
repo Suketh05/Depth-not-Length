@@ -252,5 +252,51 @@ public static class Theory
         return 1.0 / k;
     }
 
-    // === derivations appended below ===
+    // ---- B.1 compliance factorization / use factor kappa (eq:factor, Cor cor:atten) ----
+
+    /// <summary>
+    /// Use factor kappa = P_comply / P_ret (eq:factor: P_comply = P_ret * kappa; Cor cor:atten
+    /// gives the hard ceiling P_comply &lt;= kappa). Returns null when recall is 0 (kappa is
+    /// undefined with no retrieval to factorize), mirroring the Python metrics.factorization
+    /// convention (golden pack E.1: recall=0 -> kappa None, no crash).
+    /// </summary>
+    public static double? UseFactor(double compliance, double recall)
+    {
+        if (recall <= 0.0)
+            return null;
+        return compliance / recall;
+    }
+
+    /// <summary>
+    /// A published row of tab:realret ("Real-code retrieval and use, pooled dcbench+swebench
+    /// (Claude), sorted by recall"). <see cref="PublishedKappa"/> is the paper's 3-dp use
+    /// factor, or null for the `none` arm whose kappa is deliberately unpublished (no retrieval
+    /// mechanism to factorize).
+    /// </summary>
+    public sealed record RealRetRow(string Arm, double Recall, double Compliance, double? PublishedKappa);
+
+    /// <summary>
+    /// tab:realret verbatim: (arm, recall P_ret, compliance P_comply, published use factor kappa).
+    /// The similarity band is 0.56-0.64; the typed store's kappa=0.703 is the only arm to clear
+    /// it (paper headline, eq:realceiling). The `none` row's kappa is intentionally blank.
+    /// </summary>
+    public static readonly IReadOnlyList<RealRetRow> RealRet = new[]
+    {
+        new RealRetRow("brief",      0.667, 0.469, 0.703),
+        new RealRetRow("dense",      0.635, 0.406, 0.639),
+        new RealRetRow("hybrid_rrf", 0.615, 0.396, 0.644),
+        new RealRetRow("tfidf",      0.604, 0.385, 0.637),
+        new RealRetRow("bm25",       0.604, 0.344, 0.570),
+        new RealRetRow("rerank_ce",  0.583, 0.354, 0.607),
+        new RealRetRow("raptor",     0.573, 0.323, 0.564),
+        new RealRetRow("none",       0.219, 0.073, null),
+    };
+
+    // ---- B.3 scorecard tally (tab:scorecard) ----
+
+    /// <summary>
+    /// Total axes on the unbiased win/loss scorecard (tab:scorecard): wins + marginal + losses.
+    /// The paper tally is 22 W / 14 m / 5 l = 41 axes.
+    /// </summary>
+    public static int ScorecardTotal(int wins, int marginal, int losses) => wins + marginal + losses;
 }
