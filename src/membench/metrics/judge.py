@@ -48,6 +48,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from membench.metrics.compliance import decision_keywords
+from membench.types import Task
 
 __all__ = [
     "PROMPT_ORDERS",
@@ -56,6 +57,8 @@ __all__ = [
     "JudgeConfig",
     "JudgeVerdict",
     "StubComplianceJudge",
+    "TaskJudgeResult",
+    "judge_task",
 ]
 
 #: Presentation orders for the reference invariant vs. the agent answer inside the
@@ -368,3 +371,75 @@ class StubComplianceJudge(ComplianceJudge):
             rationale=self._phrase("no_reference", case.decision_id or "<none>"),
             config=self._config,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class TaskJudgeResult:
+    """Judge-graded compliance for one task, shaped like ``ComplianceResult``.
+
+    Same accounting contract as the rule-based
+    :class:`membench.metrics.compliance.ComplianceResult` (``rate = compliant /
+    total``, vacuous ``1.0`` with no governing decisions), so the two graders are
+    drop-in comparable per task -- which is what the grader-validity agreement
+    machinery of Section ``sec:gradervalidity`` compares.
+
+    Parameters
+    ----------
+    total
+        Number of governing decisions graded.
+    compliant
+        Number judged honoured.
+    compliant_ids
+        Ids of the honoured decisions, in governing order.
+    rate
+        ``compliant / total``; ``1.0`` when there are no governing decisions.
+    verdicts
+        Per-decision ``(decision_id, verdict)`` pairs, in governing order, so the
+        rationale and judge provenance of every unit remain auditable.
+    """
+
+    total: int
+    compliant: int
+    compliant_ids: tuple[str, ...]
+    rate: float
+    verdicts: tuple[tuple[str, JudgeVerdict], ...]
+
+
+def judge_task(judge: ComplianceJudge, response_text: str, task: Task) -> TaskJudgeResult:
+    """Judge every governing decision of a task against one response.
+
+    Builds one arm-blind :class:`JudgeCase` per governing decision -- the task
+    query, the decision's ground-truth text from the corpus (present regardless of
+    arm, exactly like the rule-based scorer's lookup), and the response -- and
+    aggregates the boolean verdicts into a per-task compliance rate
+    (Section ``sec:grader``). A decision id missing from the corpus contributes an
+    empty invariant, so only the bare-id fallback can honour it, mirroring
+    :func:`membench.metrics.compliance.score_compliance`.
+    """
+    if not task.governing_decisions:
+        return TaskJudgeResult(total=0, compliant=0, compliant_ids=(), rate=1.0, verdicts=())
+
+    corpus = task.corpus_by_id
+    verdicts: list[tuple[str, JudgeVerdict]] = []
+    compliant_ids: list[str] = []
+    for decision_id in task.governing_decisions:
+        item = corpus.get(decision_id)
+        case = JudgeCase(
+            task_query=task.query,
+            invariant_text=item.text if item is not None else "",
+            answer_text=response_text,
+            decision_id=decision_id,
+        )
+        verdict = judge.judge(case)
+        verdicts.append((decision_id, verdict))
+        if verdict.compliant:
+            compliant_ids.append(decision_id)
+
+    total = len(task.governing_decisions)
+    return TaskJudgeResult(
+        total=total,
+        compliant=len(compliant_ids),
+        compliant_ids=tuple(compliant_ids),
+        rate=len(compliant_ids) / total,
+        verdicts=tuple(verdicts),
+    )
