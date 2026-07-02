@@ -20,9 +20,11 @@ correlated proportions or percentages." *Psychometrika*, 12(2), 153--157.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import comb
 
+import numpy as np
 from scipy import stats
 
 __all__ = [
@@ -30,6 +32,7 @@ __all__ = [
     "McNemarExactResult",
     "clopper_pearson",
     "mcnemar_exact",
+    "mcnemar_exact_from_outcomes",
 ]
 
 
@@ -216,3 +219,33 @@ def mcnemar_exact(b: int, c: int) -> McNemarExactResult:
     p_value = min(1.0, 2.0 * cdf_k)
     mid_p = min(1.0, 2.0 * cdf_k - pmf_k)
     return McNemarExactResult(statistic=float(b - c), p_value=p_value, mid_p=mid_p, b=b, c=c)
+
+
+def mcnemar_exact_from_outcomes(
+    correct_a: Sequence[bool],
+    correct_b: Sequence[bool],
+) -> McNemarExactResult:
+    """Run :func:`mcnemar_exact` on two paired per-task correctness vectors.
+
+    Convenience wrapper matching the calling convention of
+    :func:`membench.stats.hypothesis.mcnemar_test`: element ``i`` of each vector
+    says whether the arm was correct on task ``i`` (arms share tasks, so the
+    comparison is paired). Discordant counts are tallied and passed through.
+
+    Parameters
+    ----------
+    correct_a, correct_b : Sequence[bool]
+        Paired binary outcomes (equal length) for arms A and B.
+
+    Returns
+    -------
+    McNemarExactResult
+        The exact test outcome on the tallied discordant pairs.
+    """
+    a = np.asarray(correct_a, dtype=bool)
+    bv = np.asarray(correct_b, dtype=bool)
+    if a.shape != bv.shape:
+        raise ValueError("correct_a and correct_b must be paired (equal length)")
+    b_only = int(np.sum(a & ~bv))
+    c_only = int(np.sum(~a & bv))
+    return mcnemar_exact(b_only, c_only)
