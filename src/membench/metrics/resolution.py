@@ -55,6 +55,8 @@ __all__ = [
 class TestStatus(str, Enum):
     """Post-patch status of a single test case (SWE-bench test outcomes)."""
 
+    __test__ = False  # not a pytest test class despite the ``Test`` prefix
+
     PASSED = "PASSED"
     FAILED = "FAILED"
     ERROR = "ERROR"
