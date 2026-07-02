@@ -335,3 +335,37 @@ SELECT CASE WHEN (
   )
 ) = 's-sess-3' THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 7 -- The similarity proxy returns a STALE version, and diverges from
+--   the typed resolution. Anchor: tab:super (similarity 64-69% band vs typed
+--   92.3%); the failure is ranking a near-identical stale version first.
+-- ---------------------------------------------------------------------------
+-- citation_count stands in for embedding/frequency centrality; ORDER BY it
+-- returns the most-cited version = the stale original s-sess-1, NOT the current
+-- s-sess-3. Typed supersession (ASSERT 6) and similarity ranking disagree.
+CREATE TABLE _assert_similarity_pick_is_stale (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_similarity_pick_is_stale
+SELECT CASE WHEN (
+  SELECT id FROM entity_objects
+  WHERE id IN ('s-sess-1', 's-sess-2', 's-sess-3')
+  ORDER BY citation_count DESC, id ASC
+  LIMIT 1
+) = 's-sess-1' THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_typed_beats_similarity (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_typed_beats_similarity
+SELECT CASE WHEN
+  (SELECT id FROM entity_objects WHERE id IN ('s-sess-1', 's-sess-2', 's-sess-3')
+   ORDER BY citation_count DESC, id ASC LIMIT 1) <> 's-sess-3'
+  AND
+  (WITH RECURSIVE super_walk(node) AS (
+      SELECT 's-sess-1'
+    UNION
+      SELECT e.source_entity_object_id FROM super_walk w
+      JOIN entity_link e ON e.target_entity_object_id = w.node
+      WHERE e.relationship_type = 'supersedes')
+   SELECT node FROM super_walk
+   WHERE node NOT IN (SELECT target_entity_object_id FROM entity_link WHERE relationship_type = 'supersedes')
+  ) = 's-sess-3'
+  THEN 1 ELSE 0 END;
+
