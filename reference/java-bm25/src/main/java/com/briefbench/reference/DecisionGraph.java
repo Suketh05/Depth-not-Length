@@ -187,4 +187,78 @@ public final class DecisionGraph {
     public int edgeCount() {
         return edges.size();
     }
+
+    // ------------------------------------------------------------------
+    // Supersession chains (tab:super; theory/supersession.py)
+    //
+    // A decision revised n times is a chain of n versions. "Later supersedes
+    // earlier": for versions ordered oldest..newest [v1, v2, ..., vn] the edge
+    // v_{i+1} --supersedes--> v_i is added, so a chain of n versions has exactly
+    // n-1 supersedes edges (edge_hops(n) = n-1). The current HEAD vn is the only
+    // version that is a supersedes-source but never a supersedes-target.
+    // ------------------------------------------------------------------
+
+    /**
+     * Wire a supersession chain over already-registered nodes, oldest first.
+     * Adds {@code v[i+1] --SUPERSEDES--> v[i]} for each adjacent pair at the given
+     * per-edge confidence (the per-hop fidelity {@code q} of the theory).
+     */
+    public DecisionGraph addSupersessionChain(double confidence, String... oldestToNewest) {
+        if (oldestToNewest.length < 1) {
+            throw new IllegalArgumentException("chain needs at least one version");
+        }
+        for (int i = 1; i < oldestToNewest.length; i++) {
+            addEdge(oldestToNewest[i], oldestToNewest[i - 1], RelationshipType.SUPERSEDES, confidence);
+        }
+        return this;
+    }
+
+    /**
+     * Link-following supersession resolver: from any version in a chain, walk the
+     * {@code supersedes} edges toward the newest revision and return the current HEAD.
+     * Only edges at or above {@code minConfidence} are followed (the same gate as
+     * {@link #traverse}); a low-confidence link stops the walk, so the resolver never
+     * fabricates a currency it cannot verify. Cycle-guarded.
+     *
+     * <p>This is the typed-store behaviour of tab:super: it returns the current
+     * decision by construction, not by recency-blind similarity.
+     */
+    public String resolveCurrent(String versionId, double minConfidence) {
+        if (!nodes.containsKey(versionId)) {
+            throw new IllegalArgumentException("unknown version node: " + versionId);
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        String cur = versionId;
+        seen.add(cur);
+        while (true) {
+            String newer = null;
+            for (Edge e : edges) {
+                if (e.type == RelationshipType.SUPERSEDES
+                        && e.target.equals(cur)
+                        && e.confidence >= minConfidence) {
+                    newer = e.source;
+                    break;
+                }
+            }
+            if (newer == null) {
+                return cur; // nobody supersedes cur => cur is the head
+            }
+            if (!seen.add(newer)) {
+                throw new IllegalStateException("supersession cycle at " + newer);
+            }
+            cur = newer;
+        }
+    }
+
+    /** True iff some (gated) {@code supersedes} edge targets this version. */
+    public boolean isSuperseded(String versionId, double minConfidence) {
+        for (Edge e : edges) {
+            if (e.type == RelationshipType.SUPERSEDES
+                    && e.target.equals(versionId)
+                    && e.confidence >= minConfidence) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
