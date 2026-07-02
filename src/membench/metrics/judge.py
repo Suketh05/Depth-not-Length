@@ -37,10 +37,12 @@ module -- the paper flags it as needed-before-earned future work.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from membench.metrics.compliance import decision_keywords
 from membench.types import MemoryItem, Task
 
 __all__ = [
@@ -50,6 +52,7 @@ __all__ = [
     "Judge",
     "JudgeConfig",
     "PromptOrder",
+    "StubJudge",
 ]
 
 # The answer models in the paper are Claude (Sonnet) and GPT-5.1 (Section
@@ -213,3 +216,127 @@ class Judge(Protocol):
 def _invariant_reference(task: Task, decision_id: str) -> MemoryItem | None:
     """Return the governing decision's memory item (its invariant text), if present."""
     return task.corpus_by_id.get(decision_id)
+
+
+def _seeded_confidence(seed: int, decision_id: str, honored: bool, answer: str) -> float:
+    """Return a deterministic, seed-dependent confidence in ``[0.8, 1.0]``.
+
+    The stub judge's verdict is a near-deterministic invariant check (bimodal, per
+    Section sec:gradervalidity), so confidence sits high; it is derived from a
+    stable SHA-256 digest -- not Python's salted ``hash`` -- so the same
+    ``(seed, decision, verdict, answer)`` reproduces bit-for-bit across processes,
+    which is what "seeded" reproducibility requires.
+    """
+    key = f"{seed}\x00{decision_id}\x00{int(honored)}\x00{answer}".encode()
+    digest = hashlib.sha256(key).digest()
+    fraction = int.from_bytes(digest[:8], "big") / float(1 << 64)
+    return 0.8 + 0.2 * fraction
+
+
+class StubJudge:
+    """Deterministic, offline rubric judge (paper Section sec:grader, default backend).
+
+    The rubric checks the governing decision's invariant on the answer exactly as
+    the paper's grader does (Section sec:grader: "the rubric checks the decision's
+    invariant on the output"): the invariant is *asserted* when any concrete
+    identifier the decision names appears in the answer -- the same identifier
+    surface the rule-based scorer
+    (:func:`membench.metrics.compliance.score_compliance`) checks, so the two
+    estimators are directly comparable for the agreement rate of Section
+    sec:gradervalidity.
+
+    With ``require_enforcement=True`` (the default) the judge additionally applies
+    the *gaming guard* the paper names in Section sec:gradervalidity: an arm can
+    satisfy "the invariant holds on the output" by *restating* the constraint
+    rather than by a correct edit, and the typed store -- which surfaces the
+    decision text verbatim -- is the arm most able to do so. The rubric therefore
+    separates *invariant asserted* (a decision token appears) from *invariant
+    enforced by the change* (the answer names at least one identifier the decision
+    did not, i.e. evidence of an actual edit rather than a parroted constraint).
+    Set ``require_enforcement=False`` to recover the pure invariant-assertion
+    rubric, which then agrees with the rule-based scorer by construction.
+
+    Parameters
+    ----------
+    config
+        The recorded grader configuration; its ``seed`` drives the deterministic
+        confidence. Defaults to a fresh :class:`JudgeConfig`.
+    require_enforcement
+        Whether to apply the gaming guard described above. ``True`` by default.
+    """
+
+    def __init__(
+        self, config: JudgeConfig | None = None, *, require_enforcement: bool = True
+    ) -> None:
+        self._config = config if config is not None else JudgeConfig()
+        self._require_enforcement = require_enforcement
+
+    @property
+    def config(self) -> JudgeConfig:
+        """The recorded grader configuration."""
+        return self._config
+
+    def grade(self, task: Task, agent_answer: str) -> ComplianceVerdict:
+        """Grade ``agent_answer`` against ``task``'s governing decisions (arm-blind).
+
+        Parameters
+        ----------
+        task
+            The evaluation unit whose governing decision ids index the invariant
+            text in its corpus.
+        agent_answer
+            The answer text produced by an undisclosed arm.
+
+        Returns
+        -------
+        ComplianceVerdict
+            One :class:`DecisionVerdict` per governing decision plus the roll-up.
+        """
+        verdicts = tuple(
+            self._grade_decision(task, decision_id, agent_answer)
+            for decision_id in task.governing_decisions
+        )
+        return ComplianceVerdict(task_id=task.task_id, verdicts=verdicts, config=self._config)
+
+    def _grade_decision(self, task: Task, decision_id: str, answer: str) -> DecisionVerdict:
+        item = _invariant_reference(task, decision_id)
+        invariant_tokens = decision_keywords(item.text) if item is not None else set()
+
+        # Invariant asserted? Mirror score_compliance exactly: substring match on
+        # the decision's identifiers, else the bare id when it names none.
+        if invariant_tokens:
+            asserted = any(token in answer for token in invariant_tokens)
+        else:
+            asserted = decision_id in answer
+
+        if not asserted:
+            honored = False
+            rationale = (
+                f"invariant not asserted: no identifier of {decision_id} appears in the answer"
+            )
+        elif not self._require_enforcement:
+            honored = True
+            rationale = f"invariant asserted: an identifier of {decision_id} appears in the answer"
+        else:
+            decision_tokens = decision_keywords(item.text) if item is not None else set()
+            new_tokens = decision_keywords(answer) - decision_tokens
+            honored = bool(new_tokens)
+            if honored:
+                witness = min(new_tokens)
+                rationale = (
+                    f"invariant asserted and enforced by a change "
+                    f"(answer names {witness!r}, absent from the decision)"
+                )
+            else:
+                rationale = (
+                    f"invariant merely restated, not enforced by a change "
+                    f"(gaming guard on {decision_id})"
+                )
+
+        confidence = _seeded_confidence(self._config.seed, decision_id, honored, answer)
+        return DecisionVerdict(
+            decision_id=decision_id,
+            honored=honored,
+            rationale=rationale,
+            confidence=confidence,
+        )
