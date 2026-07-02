@@ -33,3 +33,40 @@ cat(sprintf("Nemenyi critical difference (alpha = 0.05) = %.3f\n", cd))
 stopifnot(ft$p.value < 0.05)
 stopifnot(names(which.min(avg)) == "brief_graph")
 cat("OK: structured arm ranks best and the Friedman omnibus is significant\n")
+
+## ===========================================================================
+## SELF-ASSERTING STATISTICS CROSS-CHECKS (base R, CI-executed)
+## ---------------------------------------------------------------------------
+## The blocks below re-implement, in base R only, the statistical estimators
+## the paper "Depth, Not Length" relies on, and assert their golden values
+## VERBATIM from the canonical golden-value pack (float64 full precision or
+## exact fraction). Every block ends in stopifnot(), so a mismatch makes
+## Rscript exit non-zero and turns CI red -- the cross-language contract is
+## machine-enforced, not narrated. Base/stats functions only (no library()).
+##
+## Golden provenance is cited per block (golden-pack section + paper anchor).
+## Recommended tolerance: exact-fraction identity where the value is rational,
+## else abs(err) <= 1e-12 on float64 (looser where a provenance test is looser).
+## ===========================================================================
+
+# assert_close(actual, expected, tol, label): float64 tolerance gate.
+# Prints a full-precision diagnostic on failure, then stopifnot()-fails CI.
+assert_close <- function(actual, expected, tol, label) {
+  ok <- length(actual) == 1L && length(expected) == 1L &&
+    is.finite(actual) && is.finite(expected) && abs(actual - expected) <= tol
+  if (!isTRUE(ok)) {
+    cat(sprintf("FAIL %s: actual=%.17g expected=%.17g |diff|=%.3g tol=%.3g\n",
+                label, actual, expected, abs(actual - expected), tol))
+  }
+  stopifnot(isTRUE(ok))
+  invisible(TRUE)
+}
+
+# assert_true(cond, label): boolean/exact-equality gate with a labelled failure.
+assert_true <- function(cond, label) {
+  if (!isTRUE(all(cond))) cat(sprintf("FAIL %s\n", label))
+  stopifnot(isTRUE(all(cond)))
+  invisible(TRUE)
+}
+
+cat("\n== statistics cross-checks (base R) ==\n")
