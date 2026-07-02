@@ -101,4 +101,37 @@ public class TheoryTests
         // Golden pack A.3: overhead_ratio(2.0, 8.0) = 0.25.
         Assert.Equal(0.25, Theory.OverheadRatio(2.0, 8.0), Tol);
     }
+
+    // ---- A.3 (cont.) crossover depth + win-region window (Prop prop:cross / bounds.py) ----
+
+    [Fact]
+    public void ClosedFormTauZeroCrossover()
+    {
+        // Golden pack A.3: d0 = 2*ln(q/s0)/ln(rho) - 1 = -2.629133632756974; integer d* = 1.
+        Assert.Equal(-2.629133632756974, Theory.TauZeroCrossoverContinuous(Calib), 1e-12);
+        Assert.Equal(1, Theory.TauZeroCrossoverDepth(Calib)); // closed-form d* = 1 (Prop prop:cross)
+    }
+
+    [Fact]
+    public void StrictCrossoverDepthTracksTau()
+    {
+        // tau=0 -> structure already wins at d=1 (g(1)=0.501 > 0).
+        Assert.Equal(1, Theory.FindCrossoverDepth(Calib, 0.0, 5));
+        // Calibrated d*=2 window: tau in [g(1), g(2)) = [0.501, 0.79352613) (Prop prop:cross).
+        Assert.Equal(2, Theory.FindCrossoverDepth(Calib, 0.501, 5)); // g(1) not strictly > 0.501
+        Assert.Equal(2, Theory.FindCrossoverDepth(Calib, 0.79, 5));  // paper's "tau <= 0.79" endpoint
+        Assert.Equal(2, Theory.FindCrossoverDepth(Calib, 0.7935261299999998, 5)); // just below g(2)
+        // At tau == g(2), d=2 no longer strictly wins -> crossover slips to d=3.
+        Assert.Equal(3, Theory.FindCrossoverDepth(Calib, 0.7935261299999999, 5));
+        // No depth clears an overhead above the unimodal peak.
+        Assert.Null(Theory.FindCrossoverDepth(Calib, 0.99, 5));
+    }
+
+    [Fact]
+    public void WinRegionIsContiguous()
+    {
+        // Golden pack A.3: for q<1 the win region {d : g(d) > tau} is a contiguous interval.
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, Theory.WinRegionDepths(Calib, 0.0, 5));
+        Assert.Equal(new[] { 2, 3, 4, 5 }, Theory.WinRegionDepths(Calib, 0.501, 5));
+    }
 }
