@@ -28,11 +28,17 @@ in ``tests/test_agents_session.py``.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from membench.agents.llm.base import LLMClient
+from membench.agents.runner import _SYSTEM_PROMPT, RunConfig, run_task
+from membench.retrieval.base import MemorySystem
+from membench.types import Task
+
 __all__ = [
+    "DEFAULT_FOLLOW_UP_PROMPT",
     "PaperLedgerRow",
     "Session",
     "TurnRecord",
@@ -41,9 +47,20 @@ __all__ = [
     "ledger_rows",
     "matchup_winner",
     "paper_ledger_row",
+    "run_session",
     "tokens_per_resolved_point",
     "win_rate",
 ]
+
+DEFAULT_FOLLOW_UP_PROMPT = (
+    "Verify the plan against the governing decisions and finish the task."
+)
+"""Fixed follow-up prompt for turns >= 2 (identical across arms: fairness lock).
+
+Context is injected once on turn 1 (``sec:tokecon``); later turns continue the
+conversation, so their prompt is the previous response plus this constant. Any
+per-arm variation here would leak tokens into the very quantity under test.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +315,96 @@ def collapse_turns(per_turn_tokens: Sequence[int]) -> PaperLedgerRow:
 def paper_ledger_row(session: Session) -> PaperLedgerRow:
     """Render a session in the column shape of ``tab:tok_agent_context_gpt55``."""
     return collapse_turns([record.turn_tokens for record in session.turns])
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn driver over the single-turn offline runner
+# ---------------------------------------------------------------------------
+
+
+def run_session(
+    task: Task,
+    memory: MemorySystem,
+    llm: LLMClient,
+    config: RunConfig,
+    *,
+    arm_name: str,
+    is_resolved: Callable[[str, Task], bool],
+    max_turns: int = 8,
+    follow_up_prompt: str = DEFAULT_FOLLOW_UP_PROMPT,
+) -> Session:
+    """Run one task as a multi-turn session and return its per-turn ledger.
+
+    Implements the session mechanics of ``sec:tokecon``: the context layer is
+    injected once, on turn 1, and the backend model is billed on every turn it
+    runs until the task resolves or the turn cap is hit. Turn 1 is delegated to
+    the existing single-turn offline runner (:func:`membench.agents.runner.run_task`,
+    single-shot), so the corpus write, fairness-locked retrieval budget, and
+    prompt construction are byte-identical to the single-turn benchmark; turns
+    2..n continue the conversation on the previous response plus a fixed
+    follow-up, with *no* re-retrieval.
+
+    The session stops at the first turn whose output satisfies ``is_resolved``
+    (that turn is the convergence turn), else after ``max_turns`` — the paper's
+    "*k* turns, unresolved" outcome (``tab:tok_agent_context_gpt55``).
+
+    Parameters
+    ----------
+    task, memory, llm, config, arm_name
+        Exactly as for :func:`membench.agents.runner.run_task`. ``config``'s
+        retry policy is ignored: within a session, continuation is a *turn*,
+        never a hidden retry, so per-turn tokens stay a reported control.
+    is_resolved
+        Resolution predicate on (response text, task). Deciding resolution is
+        the caller's contract (offline runs use a deterministic predicate; the
+        paper's live sweep uses each benchmark's own resolution check).
+    max_turns
+        Turn cap (>= 1). Default 8 spans the paper's longest published session
+        ("8 turns, unresolved", Mem0 row of ``tab:tok_agent_context_gpt55``).
+    follow_up_prompt
+        Constant continuation prompt for turns >= 2 (fairness-locked).
+    """
+    if max_turns < 1:
+        raise ValueError(f"max_turns must be >= 1, got {max_turns}")
+
+    # Turn 1: the single-turn offline runner, forced single-shot (attempts and
+    # turns must not compound; a session's unit of repetition is the turn).
+    first = run_task(task, memory, llm, config, arm_name=arm_name, is_correct=None)[0]
+    turns = [
+        TurnRecord(
+            turn=1,
+            prompt_tokens=first.input_tokens,
+            completion_tokens=first.output_tokens,
+            dollars=first.dollars,
+            response_text=first.response_text,
+            resolved=is_resolved(first.response_text, task),
+        )
+    ]
+
+    while not turns[-1].resolved and len(turns) < max_turns:
+        user = f"{turns[-1].response_text}\n\n{follow_up_prompt}"
+        response = llm.complete(_SYSTEM_PROMPT, user, config.max_output_tokens)
+        turns.append(
+            TurnRecord(
+                turn=len(turns) + 1,
+                prompt_tokens=response.input_tokens,
+                completion_tokens=response.output_tokens,
+                dollars=response.dollars,
+                response_text=response.text,
+                resolved=is_resolved(response.text, task),
+            )
+        )
+
+    return Session(
+        task_id=task.task_id,
+        dataset=task.dataset,
+        arm=arm_name,
+        model=first.model,
+        turns=tuple(turns),
+        max_turns=max_turns,
+        retrieved_ids=first.retrieved_ids,
+        governing_decisions=task.governing_decisions,
+    )
 
 
 # ---------------------------------------------------------------------------
