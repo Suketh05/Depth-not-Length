@@ -52,9 +52,13 @@ import string
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 __all__ = [
+    "AnswerJudge",
     "FactF1",
+    "JudgeVerdict",
+    "TokenOverlapJudge",
     "answer_exact_match",
     "answer_tokens",
     "fact_f1",
@@ -238,3 +242,70 @@ def fact_f1(predicted_facts: Iterable[str], gold_facts: Iterable[str]) -> FactF1
         n_predicted=len(predicted),
         n_gold=len(gold),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeVerdict:
+    """One LoCoMo judge decision on whether a predicted answer matches the gold."""
+
+    correct: bool
+    score: float  # graded confidence in [0, 1]; the fallback uses token F1
+    rationale: str
+
+
+@runtime_checkable
+class AnswerJudge(Protocol):
+    r"""Arm-blind judge of a single answer against its gold reference.
+
+    The call signature is the type-level encoding of Section~\ref{sec:grader}: the
+    judge "sees the known invariant as reference but not the arm identity". It
+    receives only the ``question``, the ``gold_answer`` (the reference), and the
+    ``predicted_answer`` -- never which memory arm produced it -- so a judge
+    *cannot* condition on the arm even accidentally. A live LLM judge (a model
+    distinct from the answer model) implements this protocol; the offline default is
+    :class:`TokenOverlapJudge`.
+    """
+
+    def __call__(self, question: str, gold_answer: str, predicted_answer: str) -> JudgeVerdict:
+        """Return the correctness verdict for one predicted answer."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class TokenOverlapJudge:
+    r"""Deterministic LoCoMo judge: correct iff token overlap clears a threshold.
+
+    The reproducible, network-free default for the LoCoMo LLM-judge-accuracy row of
+    Table~\ref{tab:stdbench} (``sec:pubbench``). A prediction is judged correct when
+    it is a normalized exact match *or* its :func:`token_f1` against the gold answer
+    is at least ``threshold``. This is a deterministic *proxy* for the live LLM
+    judge, not a reproduction of it: it keeps the offline pipeline scoring without an
+    API key (see the ``pyproject`` offline-install note), and any live judge is
+    dropped in through the :class:`AnswerJudge` protocol without touching
+    aggregation.
+
+    Parameters
+    ----------
+    threshold
+        Minimum token F1 (in ``[0, 1]``) for a non-exact answer to count as correct.
+        Defaults to ``0.5``; this is an implementation choice, not a paper value.
+    """
+
+    threshold: float = 0.5
+
+    def __post_init__(self) -> None:
+        """Validate the threshold lies in the unit interval."""
+        if not 0.0 <= self.threshold <= 1.0:
+            raise ValueError(f"threshold must be in [0, 1], got {self.threshold}")
+
+    def __call__(self, question: str, gold_answer: str, predicted_answer: str) -> JudgeVerdict:
+        """Return a correctness verdict from normalized token overlap with gold."""
+        if answer_exact_match(predicted_answer, gold_answer):
+            return JudgeVerdict(correct=True, score=1.0, rationale="normalized exact match")
+        score = token_f1(predicted_answer, gold_answer)
+        correct = score >= self.threshold
+        return JudgeVerdict(
+            correct=correct,
+            score=score,
+            rationale=f"token F1 {score:.3f} {'>=' if correct else '<'} threshold {self.threshold}",
+        )
