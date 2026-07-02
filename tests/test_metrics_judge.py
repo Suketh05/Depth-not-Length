@@ -366,6 +366,16 @@ class TestParseVerdict:
         assert "unparseable" in verdict.rationale
 
 
+class TestDecisionVerdictValidation:
+    def test_confidence_out_of_range_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match=r"confidence must be in \[0, 1\]"):
+            DecisionVerdict("D-1", True, "bad", 1.5)
+
+    def test_boundary_confidences_are_accepted(self) -> None:
+        assert DecisionVerdict("D-1", False, "floor", 0.0).confidence == 0.0
+        assert DecisionVerdict("D-1", True, "ceil", 1.0).confidence == 1.0
+
+
 # A supersession chain: D-new supersedes D-old (the paper's governance edge). Only
 # the CURRENT decision governs, so honouring the superseded one is NOT compliance.
 _SUPER_CORPUS = (

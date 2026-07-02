@@ -146,6 +146,13 @@ class DecisionVerdict:
     rationale: str
     confidence: float
 
+    def __post_init__(self) -> None:
+        # Confidence is a probability; every producer (seeded stub, clamped parser,
+        # keyword fallback) already stays in range, so this only catches a
+        # malformed hand-built or future verdict rather than changing behaviour.
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(f"confidence must be in [0, 1], got {self.confidence}")
+
 
 @dataclass(frozen=True, slots=True)
 class ComplianceVerdict:
