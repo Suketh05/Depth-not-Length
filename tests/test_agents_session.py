@@ -23,6 +23,7 @@ from membench.agents.llm.pricing import (
     blended_session_dollars,
     price_dollars,
 )
+from membench.agents.llm.stub import StubLLMClient
 from membench.agents.runner import RunConfig
 from membench.agents.session import (
     PaperLedgerRow,
@@ -647,3 +648,86 @@ class TestRunSessionConvergence:
                 _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
                 arm_name="none", is_resolved=_resolved_on("DONE"), max_turns=0,
             )
+
+
+# ---------------------------------------------------------------------------
+# Deterministic offline sessions: the stub backend end-to-end.
+# ---------------------------------------------------------------------------
+
+
+class _NoneMemory(MemorySystem):
+    """The no-context control: retrieves nothing (context-free floor)."""
+
+    def write(self, items: Iterable[MemoryItem]) -> None:
+        return None
+
+    def retrieve(self, query: str, budget_tokens: int) -> RetrievedContext:
+        return RetrievedContext.empty()
+
+
+def _honours_governing(text: str, task: Task) -> bool:
+    # Deterministic offline resolution predicate: the response quotes an
+    # identifier from the governing decision's text (the stub echoes
+    # identifiers it finds in context, so this is decided by retrieval).
+    return "DateRangePicker" in text or "Button" in text
+
+
+class TestDeterministicOfflineSessions:
+    def test_repeated_runs_are_identical(self) -> None:
+        def run_once() -> Session:
+            memory = _CountingMemory()
+            return run_session(
+                _task(), memory, StubLLMClient(), RunConfig(budget_tokens=10_000),
+                arm_name="brief_graph", is_resolved=_honours_governing,
+            )
+
+        first, second = run_once(), run_once()
+        assert first == second  # frozen dataclasses: structural equality
+        assert ledger_rows(first) == ledger_rows(second)
+
+    def test_context_session_converges_where_contextless_never_does(self) -> None:
+        # The mechanism of sec:tokecon in miniature, fully offline: with the
+        # corpus in context the stub honours the governing decision and the
+        # session converges on turn 1; with no context it re-searches until the
+        # turn cap and stays unresolved (the multi-turn image of the
+        # context-free floor, thm:irreducible).
+        with_context = run_session(
+            _task(), _CountingMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph", is_resolved=_honours_governing, max_turns=6,
+        )
+        without_context = run_session(
+            _task(), _NoneMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
+            arm_name="none", is_resolved=_honours_governing, max_turns=6,
+        )
+        assert with_context.convergence_turn == 1
+        assert without_context.convergence_turn is None
+        assert without_context.n_turns == 6
+
+    def test_contextless_session_burns_more_total_tokens(self) -> None:
+        # Fewer turns beats a cheaper turn: the context arm pays a heavier
+        # turn 1 but the contextless arm pays every turn — the paper's whole
+        # economic argument, reproduced deterministically.
+        with_context = run_session(
+            _task(), _CountingMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph", is_resolved=_honours_governing, max_turns=6,
+        )
+        without_context = run_session(
+            _task(), _NoneMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
+            arm_name="none", is_resolved=_honours_governing, max_turns=6,
+        )
+        assert with_context.turns[0].prompt_tokens > without_context.turns[0].prompt_tokens
+        assert with_context.session_tokens < without_context.session_tokens
+        assert matchup_winner(
+            with_context.session_tokens, without_context.session_tokens
+        ) == "brief"
+
+    def test_stub_sessions_price_through_the_pricing_table(self) -> None:
+        session = run_session(
+            _task(), _CountingMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph", is_resolved=_honours_governing,
+        )
+        expected = sum(
+            price_dollars("stub", t.prompt_tokens, t.completion_tokens) for t in session.turns
+        )
+        assert session.session_dollars == expected
+        assert session.model == "stub"
