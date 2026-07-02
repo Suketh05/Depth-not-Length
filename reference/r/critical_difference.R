@@ -267,3 +267,27 @@ assert_close(cohen_h(0.875, 0.800), 0.20456097018819674, 1e-12, "CohenH(0.875,0.
 assert_close(cohen_h(0.5,   0.5),   0.0,                 1e-12, "CohenH(0.5,0.5)=0")
 cat(sprintf("PASS (4) Wilson+Cohen h: (8,10)=(%.15g,%.15g) (6,8)=(%.15g,%.15g) h(.9,.5)=%.16g\n",
             w1$low, w1$high, w2$low, w2$high, cohen_h(0.9, 0.5)))
+
+## ---------------------------------------------------------------------------
+## (5) Paper-table identity: use factor kappa = compliance / recall
+##     Verifies tab:realret (real-code retrieval and use, pooled dcbench+
+##     swebench, Claude) against paper Eq eq:factor (P_comply = P_ret * kappa)
+##     => kappa = compliance/recall. Golden pack B.1. Each row's published
+##     3-dp kappa is exactly the rounding of compliance/recall, so
+##     round(compliance/recall, 3) must equal the published kappa for all 7
+##     arms with a published use factor. (The `none` arm's kappa is
+##     intentionally unpublished -- no retrieval mechanism to factorize -- and
+##     is deliberately excluded from the identity.)
+## ---------------------------------------------------------------------------
+realret_arm     <- c("brief", "dense", "hybrid_rrf", "tfidf", "bm25", "rerank_ce", "raptor")
+realret_recall  <- c(0.667,   0.635,   0.615,        0.604,   0.604,  0.583,       0.573)
+realret_comply  <- c(0.469,   0.406,   0.396,        0.385,   0.344,  0.354,       0.323)
+realret_kappa   <- c(0.703,   0.639,   0.644,        0.637,   0.570,  0.607,       0.564)
+kappa_computed  <- round(realret_comply / realret_recall, 3)
+assert_true(length(realret_arm) == 7L, "realret:7-arm table")
+assert_true(kappa_computed == realret_kappa, "realret:kappa==round(compliance/recall,3)")
+# Headline: typed store kappa=0.703 clears the 0.56-0.64 similarity band.
+assert_true(realret_kappa[realret_arm == "brief"] > max(realret_kappa[realret_arm != "brief"]),
+            "realret:brief kappa tops similarity band")
+cat(sprintf("PASS (5) tab:realret identity: round(compliance/recall,3)==kappa for all %d arms (brief kappa=%.3f)\n",
+            length(realret_arm), realret_kappa[realret_arm == "brief"]))
