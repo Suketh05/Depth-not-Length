@@ -131,3 +131,19 @@ INSERT INTO entity_link (id, source_entity_object_id, target_entity_object_id, r
   ('e-iso-1', 'dx-iso-1', 'dx-iso-2',  'related_to', 'inferred',  0.75, 'embedding'),
   ('e-trap',  'q-task',   'd-gov-3',   'related_to', 'inferred',  0.20, 'embedding');
 
+-- ---------------------------------------------------------------------------
+-- SEED 4/4 -- Edgeless copy of the chain (the "Discrete-no-links" condition).
+-- ---------------------------------------------------------------------------
+-- Same four decisions, discrete, with ZERO typed links between them -- exactly
+-- the capture-experiment condition where the decisions exist but the governance
+-- edges have been stripped (sec:capture, tab:capexp). Reachability from the
+-- edgeless task must collapse to 0 governing decisions: the mechanism is the
+-- LINKS, not the discreteness of the records (Brief d3 recall 1.00 -> 0.42 when
+-- links are removed; here modeled as reachability 1 -> 0).
+INSERT INTO entity_objects (id, entity_type, entity_id, kind, canonical_type, title, access_count, citation_count) VALUES
+  ('q-task-e',  'task',     'T-4821E', 'source', 'task',     'Edgeless copy: swap checkout button click handler', 0, 0),
+  ('d-gov-1-e', 'decision', 'D-1001E', 'source', 'decision', 'Edgeless copy of d-gov-1', 0, 0),
+  ('d-gov-2-e', 'decision', 'D-1002E', 'source', 'decision', 'Edgeless copy of d-gov-2', 0, 0),
+  ('d-gov-3-e', 'decision', 'D-1003E', 'source', 'decision', 'Edgeless copy of d-gov-3 (unreachable without links)', 0, 0);
+-- (No entity_link rows for the *-e nodes: the discrete-no-links condition.)
+
