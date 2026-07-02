@@ -53,14 +53,26 @@ from enum import Enum
 
 __all__ = [
     "DEFAULT_BRIEF_LAYER",
+    "EFFICIENCY_SCALE",
     "Matchup",
     "MatchupOutcome",
     "SessionRecord",
     "WinRate",
     "build_matchups",
+    "efficiency_score",
     "tally",
     "tally_by_competitor",
+    "tokens_per_resolved_point",
 ]
+
+#: Scale constant for the composite efficiency score of ``tab:tok_agent_economics``.
+#: With the score defined as ``EFFICIENCY_SCALE * resolution_rate / session_tokens``
+#: and a "resolved point" being one percentage point of resolution, the score and
+#: its companion :func:`tokens_per_resolved_point` satisfy the exact identity
+#: ``efficiency_score * tokens_per_resolved_point == EFFICIENCY_SCALE / 100`` (a
+#: constant ``1e5``). ``1e7`` reproduces the paper's published column, e.g. Brief's
+#: ``1e7 * 0.480 / 12400 = 387.10`` (published ``387.1``).
+EFFICIENCY_SCALE = 1e7
 
 #: The context-layer name reserved for the typed decision-graph store under test.
 #: The tournament pairs this layer against every other layer in the sweep.
@@ -360,3 +372,87 @@ def tally_by_competitor(matchups: Iterable[Matchup]) -> dict[str, WinRate]:
         )
         for competitor in competitors
     }
+
+
+def tokens_per_resolved_point(resolution_rate: float, mean_session_tokens: float) -> float:
+    """Session tokens spent per percentage-point of resolution.
+
+    Column ``Tok./res. pt`` of ``tab:tok_agent_economics``: the mean session
+    tokens divided by the resolution rate expressed as a percentage. A "resolved
+    point" is one percentage point of resolution, so for ``Brief`` (``48.0%``
+    resolution at ``12{,}400`` tokens) the cost is ``12400 / 48.0 = 258.3`` tokens
+    per resolved point.
+
+    Parameters
+    ----------
+    resolution_rate
+        Fraction of sessions that resolved, in ``(0, 1]``.
+    mean_session_tokens
+        Mean session tokens spent by the layer. Non-negative.
+
+    Returns
+    -------
+    float
+        Tokens per percentage-point of resolution.
+
+    Raises
+    ------
+    ValueError
+        If ``resolution_rate`` is not in ``(0, 1]`` (a layer that never resolves
+        has an undefined cost per resolved point), or ``mean_session_tokens`` is
+        negative.
+    """
+    if not 0.0 < resolution_rate <= 1.0:
+        msg = f"resolution_rate must be in (0, 1], got {resolution_rate}"
+        raise ValueError(msg)
+    if mean_session_tokens < 0.0:
+        msg = f"mean_session_tokens must be non-negative, got {mean_session_tokens}"
+        raise ValueError(msg)
+    resolution_percent = resolution_rate * 100.0
+    return mean_session_tokens / resolution_percent
+
+
+def efficiency_score(
+    resolution_rate: float,
+    mean_session_tokens: float,
+    *,
+    scale: float = EFFICIENCY_SCALE,
+) -> float:
+    """Composite quality-per-token efficiency score.
+
+    Column ``Efficiency score`` of ``tab:tok_agent_economics``: resolution quality
+    delivered per session token, scaled for readability. Defined as
+    ``scale * resolution_rate / mean_session_tokens``. With the default
+    :data:`EFFICIENCY_SCALE` this reproduces the paper's column, e.g. ``Brief``
+    (``48.0%`` at ``12{,}400`` tokens) scores ``1e7 * 0.48 / 12400 = 387.10``
+    (published ``387.1``), and it is the reciprocal companion of
+    :func:`tokens_per_resolved_point`: their product is the constant
+    ``scale / 100``.
+
+    Parameters
+    ----------
+    resolution_rate
+        Fraction of sessions that resolved, in ``[0, 1]``.
+    mean_session_tokens
+        Mean session tokens spent by the layer. Strictly positive.
+    scale
+        Readability multiplier; the default reproduces the published column.
+
+    Returns
+    -------
+    float
+        The efficiency score (``0.0`` when nothing resolves).
+
+    Raises
+    ------
+    ValueError
+        If ``resolution_rate`` is outside ``[0, 1]`` or ``mean_session_tokens`` is
+        not strictly positive.
+    """
+    if not 0.0 <= resolution_rate <= 1.0:
+        msg = f"resolution_rate must be in [0, 1], got {resolution_rate}"
+        raise ValueError(msg)
+    if mean_session_tokens <= 0.0:
+        msg = f"mean_session_tokens must be strictly positive, got {mean_session_tokens}"
+        raise ValueError(msg)
+    return scale * resolution_rate / mean_session_tokens
