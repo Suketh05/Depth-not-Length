@@ -341,3 +341,11 @@ assert_true(length(pava_increasing(numeric(0))) == 0L, "edge:PAVA empty->empty")
 tost_eq <- tost_two_means(10.0, 1.0, 50, 10.0, 1.0, 50, delta = 1.0)
 assert_true(tost_eq$p_value < 0.05, "edge:TOST equivalent verdict")
 cat("PASS (7) edge cases: DL/Wilson/Cohen/PAVA/TOST boundaries (floors, saturation, empty)\n")
+
+## ---------------------------------------------------------------------------
+## Aggregate summary. If control reaches here, every stopifnot() above passed
+## and Rscript exits 0; any golden mismatch would have exited non-zero above.
+## ---------------------------------------------------------------------------
+cat("\nOK: all 7 base-R statistics cross-checks passed",
+    "(DerSimonian-Laird, Schuirmann TOST, PAVA isotonic,",
+    "Wilson+Cohen h, tab:realret identity, theory gap g(2), edge cases)\n")
