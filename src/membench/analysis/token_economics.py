@@ -56,7 +56,9 @@ __all__ = [
     "Matchup",
     "MatchupOutcome",
     "SessionRecord",
+    "WinRate",
     "build_matchups",
+    "tally",
 ]
 
 #: The context-layer name reserved for the typed decision-graph store under test.
@@ -237,3 +239,83 @@ def build_matchups(
                 )
             )
     return tuple(matchups)
+
+
+@dataclass(frozen=True, slots=True)
+class WinRate:
+    """Aggregated outcome of a set of session-token matchups.
+
+    The win rate is the fraction of matchups in which the typed store spent fewer
+    session tokens (``tab:tok_context_winrate``: ``2880 / 3600 = 0.800``). Ties are
+    counted separately and remain in the denominator, so ``rate`` reads as a share
+    of *all* matchups; because the paper reports 0 ties, ``rate`` also equals
+    ``wins / (wins + losses)`` there.
+
+    Parameters
+    ----------
+    wins
+        Matchups the typed store won (strictly fewer session tokens).
+    losses
+        Matchups the competitor won.
+    ties
+        Matchups with equal session-token spend.
+    """
+
+    wins: int
+    losses: int
+    ties: int
+
+    @property
+    def total(self) -> int:
+        """Total matchups, ``wins + losses + ties``."""
+        return self.wins + self.losses + self.ties
+
+    @property
+    def rate(self) -> float:
+        """Share of all matchups the typed store won, in ``[0, 1]``.
+
+        Raises
+        ------
+        ValueError
+            If there are no matchups (an undefined rate).
+        """
+        if self.total == 0:
+            msg = "win rate is undefined for zero matchups"
+            raise ValueError(msg)
+        return self.wins / self.total
+
+    @property
+    def loss_rate(self) -> float:
+        """Share of all matchups the competitor won, in ``[0, 1]``."""
+        if self.total == 0:
+            msg = "loss rate is undefined for zero matchups"
+            raise ValueError(msg)
+        return self.losses / self.total
+
+
+def tally(matchups: Iterable[Matchup]) -> WinRate:
+    """Count wins, losses and ties over a set of matchups.
+
+    Implements the aggregate of ``tab:tok_context_winrate``: over the sweep's
+    matchups, how often the typed store is the cheaper session.
+
+    Parameters
+    ----------
+    matchups
+        The matchups to aggregate.
+
+    Returns
+    -------
+    WinRate
+        The win/loss/tie counts.
+    """
+    wins = losses = ties = 0
+    for matchup in matchups:
+        outcome = matchup.outcome
+        if outcome is MatchupOutcome.BRIEF_CHEAPER:
+            wins += 1
+        elif outcome is MatchupOutcome.COMPETITOR_CHEAPER:
+            losses += 1
+        else:
+            ties += 1
+    return WinRate(wins=wins, losses=losses, ties=ties)
