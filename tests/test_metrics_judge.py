@@ -12,6 +12,8 @@ Goldens are hand-built:
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from membench.agents.llm.base import LLMClient, LLMResponse
@@ -28,6 +30,7 @@ from membench.metrics.judge import (
     agreement_rate,
     build_judge_prompt,
     judge_vs_rule_agreement,
+    make_judge,
     parse_verdict,
 )
 from membench.types import MemoryItem, Scorer, SpecVariant, Task
@@ -404,3 +407,36 @@ class TestArmInvariance:
         first = StubJudge(JudgeConfig(seed=3)).grade(task, _ANSWER_ENFORCED)
         second = StubJudge(JudgeConfig(seed=3)).grade(task, _ANSWER_ENFORCED)
         assert first == second
+
+
+class TestMakeJudgeFactory:
+    def test_default_backend_is_the_offline_stub(self) -> None:
+        judge = make_judge(seed=5)
+        assert isinstance(judge, StubJudge)
+        assert isinstance(judge, Judge)
+        assert judge.config.seed == 5
+
+    def test_llm_backend_builds_distinct_model_judge_without_network(self) -> None:
+        # Constructing the live judge only validates the pricing row -- no network
+        # is touched until .grade() is called -- so the distinct-model wiring is
+        # checkable offline.
+        judge = make_judge("llm")
+        assert isinstance(judge, LLMJudge)
+        assert judge.config.model == DEFAULT_JUDGE_MODEL
+        assert judge.config.is_distinct_from(["claude-sonnet-4-6", "gpt-5.1"]) is True
+
+    def test_unknown_backend_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown judge backend"):
+            make_judge("magic")
+
+
+@pytest.mark.live
+class TestLLMJudgeLive:
+    @pytest.mark.skipif(
+        not os.environ.get("ANTHROPIC_API_KEY"), reason="live judge needs ANTHROPIC_API_KEY"
+    )
+    def test_live_llm_judge_grades_an_enforced_answer(self) -> None:
+        judge = make_judge("llm")
+        verdict = judge.grade(_task(("D-001",)), _ANSWER_ENFORCED)
+        assert isinstance(verdict, ComplianceVerdict)
+        assert verdict.total == 1
