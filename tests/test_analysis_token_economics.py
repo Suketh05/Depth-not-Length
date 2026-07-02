@@ -26,8 +26,10 @@ from membench.analysis.token_economics import (
     Matchup,
     MatchupOutcome,
     SessionRecord,
+    SystemEconomics,
     WinRate,
     build_matchups,
+    economics_by_system,
     efficiency_score,
     matchup_count,
     tally,
@@ -471,3 +473,47 @@ class TestMatchupCount:
     def test_negative_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-negative"):
             matchup_count(-1, 30, 10)
+
+
+class TestEconomicsBySystem:
+    """Aggregate session records into tab:tok_agent_economics rows."""
+
+    def test_reconstructs_brief_row(self) -> None:
+        # 25 sessions, 12 resolved -> 48.0% resolution; every session spends 12400
+        # tokens -> the published Brief row (258.3 tok/pt, efficiency 387.1).
+        sessions = [
+            _session("gpt-4o", f"swe-{i:03d}", "brief", 12400, resolved=i < 12) for i in range(25)
+        ]
+        summaries = economics_by_system(sessions)
+        assert list(summaries) == ["brief"]
+        brief = summaries["brief"]
+        assert isinstance(brief, SystemEconomics)
+        assert brief.n_sessions == 25
+        assert brief.resolution_rate == 0.48
+        assert brief.mean_session_tokens == 12400.0
+        assert brief.tokens_per_resolved_point == pytest.approx(258.3, abs=0.05)
+        assert brief.efficiency_score == pytest.approx(387.1, abs=0.05)
+        # The aggregated row agrees with the standalone scalar functions.
+        assert brief.efficiency_score == efficiency_score(0.48, 12400.0)
+        assert brief.tokens_per_resolved_point == tokens_per_resolved_point(0.48, 12400.0)
+
+    def test_never_resolved_layer_has_no_cost_per_point(self) -> None:
+        sessions = [_session("m", f"t{i}", "raptor", 48000, resolved=False) for i in range(4)]
+        summaries = economics_by_system(sessions)
+        raptor = summaries["raptor"]
+        assert raptor.resolution_rate == 0.0
+        assert raptor.tokens_per_resolved_point is None  # undefined, not a crash
+        assert raptor.efficiency_score == 0.0
+
+    def test_groups_multiple_layers(self) -> None:
+        sessions = [
+            _session("m", "t1", "brief", 1000, resolved=True),
+            _session("m", "t2", "brief", 3000, resolved=False),
+            _session("m", "t1", "mem0", 5000, resolved=True),
+        ]
+        summaries = economics_by_system(sessions)
+        assert list(summaries) == ["brief", "mem0"]  # sorted keys
+        assert summaries["brief"].mean_session_tokens == 2000.0
+        assert summaries["brief"].resolution_rate == 0.5
+        assert summaries["mem0"].n_sessions == 1
+        assert summaries["mem0"].resolution_rate == 1.0
