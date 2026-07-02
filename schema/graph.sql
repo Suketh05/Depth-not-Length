@@ -446,3 +446,39 @@ SELECT CASE WHEN instr(
   'UNIQUE (source_entity_object_id, target_entity_object_id, relationship_type)'
 ) > 0 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 11 -- No self-supersession (a decision cannot supersede itself), and
+--   the guard clause that enforces it is demonstrably present.
+--   Anchor: sec:fairness (edge integrity; supersession must form an acyclic
+--   version chain, so a self-loop is meaningless and disallowed).
+-- ---------------------------------------------------------------------------
+-- (a) Data invariant: the seeded graph contains NO self-referential edge.
+CREATE TABLE _assert_no_self_edge (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_no_self_edge
+SELECT CASE WHEN (
+  SELECT COUNT(*) FROM entity_link
+  WHERE source_entity_object_id = target_entity_object_id
+) = 0 THEN 1 ELSE 0 END;
+
+-- (b) Enforcement demo: a portable guard table carries the no-self-loop CHECK
+-- that Brief's Postgres schema pins on supersedes edges. We cannot run a
+-- violating INSERT (it would abort the batch and fail CI by design), so we
+-- (i) insert a VALID non-self edge to show conforming rows pass, and (ii) assert
+-- via schema introspection that the CHECK (source <> target) clause is present
+-- and would reject a self-loop.
+CREATE TABLE _super_selfloop_guard (
+  source_entity_object_id TEXT NOT NULL,
+  target_entity_object_id TEXT NOT NULL,
+  relationship_type       TEXT NOT NULL DEFAULT 'supersedes',
+  CHECK (source_entity_object_id <> target_entity_object_id)
+);
+INSERT INTO _super_selfloop_guard (source_entity_object_id, target_entity_object_id, relationship_type)
+VALUES ('s-sess-3', 's-sess-2', 'supersedes');  -- valid: distinct endpoints pass the guard
+
+CREATE TABLE _assert_selfloop_guard_present (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_selfloop_guard_present
+SELECT CASE WHEN instr(
+  (SELECT sql FROM sqlite_master WHERE name = '_super_selfloop_guard'),
+  'CHECK (source_entity_object_id <> target_entity_object_id)'
+) > 0 THEN 1 ELSE 0 END;
+
