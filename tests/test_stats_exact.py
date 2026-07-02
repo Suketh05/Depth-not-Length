@@ -363,3 +363,30 @@ class TestMcNemarFromOutcomes:
     def test_unequal_lengths_rejected(self) -> None:
         with pytest.raises(ValueError, match="paired"):
             mcnemar_exact_from_outcomes([True, False], [True])
+
+
+class TestAgreementWithExistingMcnemar:
+    """The new integer-arithmetic tail must agree with stats.hypothesis.
+
+    membench.stats.hypothesis.mcnemar_test computes the same exact test via
+    scipy.stats.binomtest; for the symmetric null p0 = 1/2 the 'minlike'
+    two-sided p equals the doubled smaller tail, so the two implementations
+    must agree to floating precision on every discordant table. The new module
+    additionally reports the mid-p variant and the (b, c) counts.
+    """
+
+    @pytest.mark.parametrize(
+        ("b", "c"),
+        [(2, 8), (0, 13), (1, 1), (4, 6), (0, 0), (7, 19)],
+    )
+    def test_p_values_agree(self, b: int, c: int) -> None:
+        from membench.stats.hypothesis import mcnemar_test
+
+        # Build outcome vectors realizing exactly (b, c) discordants plus some
+        # concordant padding, then run both implementations on the same data.
+        correct_a = [True] * b + [False] * c + [True] * 5 + [False] * 3
+        correct_b = [False] * b + [True] * c + [True] * 5 + [False] * 3
+        legacy = mcnemar_test(correct_a, correct_b)
+        new = mcnemar_exact_from_outcomes(correct_a, correct_b)
+        assert new.p_value == pytest.approx(legacy.p_value, rel=1e-12)
+        assert new.statistic == legacy.statistic  # both report b - c
