@@ -190,6 +190,42 @@ class TestPaperTurnLedgerGpt55:
             assert session.convergence_turn == convergence, label
             assert session.num_turns == len(per_turn), label
 
+    def test_session_api_reproduces_brief_row_usd(self) -> None:
+        # The whole "Brief context" row through the Session API: 1598/203/34 tokens
+        # at the GPT-5.5 blended rate -> the published $0.022.
+        turns = (
+            TurnLedger.from_total(1, 1598, resolved=False),
+            TurnLedger.from_total(2, 203, resolved=False),
+            TurnLedger.from_total(3, 34, resolved=True),
+        )
+        session = Session("gpt-5.5", "brief_graph", turns)
+        assert abs(session.blended_cost_dollars() - 0.022) <= _usd_tol(3)
+        # Cumulative dollars are monotone and end at the session cost.
+        cumulative = session.cumulative_dollars()
+        assert list(cumulative) == sorted(cumulative)
+        assert cumulative[-1] == pytest.approx(session.blended_cost_dollars())
+
+    def test_cross_pricing_the_same_ledger_under_gpt4o(self) -> None:
+        # The same token ledger can be repriced under a different backend rate; a
+        # 12400-token session at the gpt-4o rate is the paper's Brief economics USD.
+        session = Session(
+            "gpt-5.5", "brief_graph", (TurnLedger.from_total(1, 12400, resolved=True),)
+        )
+        assert abs(session.blended_cost_dollars("gpt-4o") - 0.057) <= _usd_tol(3)
+
+    def test_as_row_is_json_friendly(self) -> None:
+        turns = (
+            TurnLedger.from_total(1, 1598, resolved=False),
+            TurnLedger.from_total(2, 203, resolved=False),
+            TurnLedger.from_total(3, 34, resolved=True),
+        )
+        row = Session("gpt-5.5", "brief_graph", turns).as_row()
+        assert row["per_turn_tokens"] == [1598, 203, 34]
+        assert row["session_tokens"] == 1835
+        assert row["convergence_turn"] == 3
+        assert row["resolved"] is True
+        assert isinstance(row["per_turn_tokens"], list)
+
 
 class TestTurnLedger:
     def test_total_is_prompt_plus_completion(self) -> None:
