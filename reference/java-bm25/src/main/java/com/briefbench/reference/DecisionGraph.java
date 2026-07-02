@@ -413,6 +413,89 @@ public final class DecisionGraph {
         return (int) Math.ceil(sigma / pBar);
     }
 
+    // ------------------------------------------------------------------
+    // The fairness lock (sec:fairness / sec:budget)
+    //
+    // Every arm is handed an IDENTICAL token budget (matched across arms to ~1%
+    // in the paper; fig:tokensbox), and the context packer is deterministic, so
+    // any measured win reflects the memory mechanism and not an unequal budget or
+    // a lucky packing order. We model that as: (1) equal budgets, (2) a greedy
+    // packer that is a pure function of (item order, budget).
+    // ------------------------------------------------------------------
+
+    /** A context item with a fixed token cost (a candidate for the packed window). */
+    public static final class Item {
+        public final String id;
+        public final int tokens;
+
+        public Item(String id, int tokens) {
+            if (tokens < 0) {
+                throw new IllegalArgumentException("tokens must be >= 0: " + tokens);
+            }
+            this.id = Objects.requireNonNull(id, "id");
+            this.tokens = tokens;
+        }
+    }
+
+    /** Result of a packing pass: the packed ids (in packed order) and tokens used. */
+    public static final class PackResult {
+        public final List<String> packedIds;
+        public final int usedTokens;
+
+        PackResult(List<String> packedIds, int usedTokens) {
+            this.packedIds = Collections.unmodifiableList(packedIds);
+            this.usedTokens = usedTokens;
+        }
+    }
+
+    /**
+     * The fairness lock: hand every arm the SAME token budget. Returns an
+     * insertion-ordered map arm -&gt; budget with every value equal to {@code budget}.
+     */
+    public static Map<String, Integer> equalBudgets(List<String> arms, int budget) {
+        if (budget < 0) {
+            throw new IllegalArgumentException("budget must be >= 0: " + budget);
+        }
+        Map<String, Integer> out = new LinkedHashMap<>();
+        for (String arm : arms) {
+            out.put(arm, budget);
+        }
+        return out;
+    }
+
+    /**
+     * Deterministic greedy packer: walk {@code items} in the given order and admit
+     * each one whose token cost still fits under {@code budget}, skipping (not
+     * stopping at) any item that would overflow. Pure function of (order, budget) —
+     * no randomness, no tie ambiguity — so two arms with identical item lists and the
+     * same budget pack identically. Mirrors the harness's construct-cap packing.
+     */
+    public static PackResult pack(List<Item> items, int budget) {
+        if (budget < 0) {
+            throw new IllegalArgumentException("budget must be >= 0: " + budget);
+        }
+        List<String> packed = new ArrayList<>();
+        int used = 0;
+        for (Item it : items) {
+            if (used + it.tokens <= budget) {
+                packed.add(it.id);
+                used += it.tokens;
+            }
+        }
+        return new PackResult(packed, used);
+    }
+
+    /**
+     * Canonical packing order (tokens ascending, then id lexicographic) — a stable
+     * total order that removes any dependence on the arbitrary arrival order of
+     * candidates, so the packer is reproducible across runs / languages / seeds.
+     */
+    public static List<Item> canonicalOrder(List<Item> items) {
+        List<Item> sorted = new ArrayList<>(items);
+        sorted.sort(Comparator.comparingInt((Item it) -> it.tokens).thenComparing(it -> it.id));
+        return sorted;
+    }
+
     // ---- domain guards (replicate the Python module invariants) ----
 
     private static void requireChainLength(int n) {
