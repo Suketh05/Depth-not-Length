@@ -115,3 +115,46 @@ function renderTable(results: readonly CheckResult[]): string {
   const sep = widths.map((w) => "-".repeat(w)).join("  ");
   return [line(headers), sep, ...rows.map(line)].join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// Identity B.1 — use factor kappa = compliance / recall (tab:realret, eq:factor).
+// For each of the 7 published arms: (1) the CSV-internal round trip
+// |compliance/recall - kappa_published| <= 0.0005; (2) round(ratio,3) equals the
+// published 3-dp kappa; (3) the ratio reproduces golden-pack B.1 full precision.
+// The none arm carries no published kappa (blank) and is asserted null.
+// ---------------------------------------------------------------------------
+
+const KAPPA_TOL = 0.0005; // task tolerance on |compliance/recall - kappa|
+const GOLDEN_TOL = 1e-12; // float64 identity vs the golden-pack B.1 constants
+
+function checkKappaRoundTrip(): CheckResult[] {
+  const rows = loadRealcodePooled();
+  const results: CheckResult[] = [];
+  for (const row of rows) {
+    if (row.kappa === null) {
+      results.push({
+        identity: `${row.arm}: kappa unpublished (no retrieval mechanism to factorize)`,
+        sourceFile: "paper_realcode_pooled.csv",
+        paperLabel: "tab:realret / B.1",
+        expected: "null",
+        actual: "null",
+        ok: true,
+      });
+      continue;
+    }
+    const ratio = row.compliance / row.recall;
+    const golden = PAPER_KAPPA_GOLDEN[row.arm];
+    const withinTol = approxEqual(ratio, row.kappa, KAPPA_TOL);
+    const roundsToPublished = Math.round(ratio * 1000) / 1000 === row.kappa;
+    const matchesGolden = golden !== undefined && approxEqual(ratio, golden, GOLDEN_TOL);
+    results.push({
+      identity: `${row.arm}: compliance/recall = ${row.compliance}/${row.recall} ~= kappa`,
+      sourceFile: "paper_realcode_pooled.csv",
+      paperLabel: "tab:realret / eq:factor",
+      expected: `${row.kappa} (|d|<=${KAPPA_TOL})`,
+      actual: `${fmt(ratio, 10)} (|d|=${fmt(Math.abs(ratio - row.kappa), 5)})`,
+      ok: withinTol && roundsToPublished && matchesGolden,
+    });
+  }
+  return results;
+}
