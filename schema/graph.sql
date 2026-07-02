@@ -203,3 +203,25 @@ SELECT CASE WHEN (
   SELECT MIN(depth) FROM walk WHERE node = 'd-gov-3'
 ) = 1 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 2 -- The capture lever: no links => the governing decision is
+--   UNREACHABLE (reachable count 0). Anchors: sec:capture, tab:capexp
+--   (Discrete-no-links / Raw-scattered conditions).
+-- ---------------------------------------------------------------------------
+-- Walk from the edgeless task: it reaches only itself, so the count of reachable
+-- governing decisions is 0. Same records as the linked chain, links removed ->
+-- recovery collapses. The mechanism is the typed links, not the records.
+CREATE TABLE _assert_edgeless_unreachable (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_edgeless_unreachable
+SELECT CASE WHEN (
+  WITH RECURSIVE walk(node, depth) AS (
+      SELECT 'q-task-e', 0
+    UNION
+      SELECT e.target_entity_object_id, walk.depth + 1
+      FROM walk
+      JOIN entity_link e ON e.source_entity_object_id = walk.node
+      WHERE walk.depth < 3 AND e.confidence >= 0.5
+  )
+  SELECT COUNT(*) FROM walk WHERE node IN ('d-gov-1-e', 'd-gov-2-e', 'd-gov-3-e')
+) = 0 THEN 1 ELSE 0 END;
+
