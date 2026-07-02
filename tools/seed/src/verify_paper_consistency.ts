@@ -28,6 +28,7 @@
  * check is usable as a CI/pre-publication gate.
  */
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import {
   parseCsv,
   loadRealcodePooled,
@@ -326,4 +327,65 @@ function checkDepthSlope(): CheckResult[] {
     });
   }
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Entry point — run the parser self-tests, collect every identity, print the
+// report, and exit non-zero on any violation.
+// ---------------------------------------------------------------------------
+
+function runAllChecks(): CheckResult[] {
+  return [
+    ...checkKappaRoundTrip(),
+    ...checkTokenWinRate(),
+    ...checkScorecard(),
+    ...checkSyntheticOrdering(),
+    ...checkDepthSlope(),
+  ];
+}
+
+function main(): void {
+  runParserSelfTests();
+  const dataDir = resolveDataDir();
+  console.log(`Depth, Not Length — paper-CSV internal-consistency audit`);
+  console.log(`data dir: ${dataDir}\n`);
+  const results = runAllChecks();
+  console.log(renderTable(results));
+  const failures = results.filter((r) => !r.ok);
+  const passed = results.length - failures.length;
+  console.log(`\n${passed}/${results.length} identities hold.`);
+  if (failures.length > 0) {
+    console.error(`\nFAILED (${failures.length}):`);
+    for (const f of failures) {
+      console.error(`  - ${f.identity} [${f.paperLabel}]: expected ${f.expected}, got ${f.actual}`);
+    }
+    process.exit(1);
+  }
+  console.log("All paper-internal identities are consistent.");
+}
+
+/**
+ * Detect direct invocation robustly across symlinked temp dirs (macOS /tmp ->
+ * /private/tmp): compare the real paths of this module and argv[1], not the raw
+ * strings, so the out-of-tree runtime gate reports instead of silently exiting.
+ */
+function isInvokedDirectly(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) {
+    return false;
+  }
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
+}
+
+if (isInvokedDirectly()) {
+  try {
+    main();
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 }
