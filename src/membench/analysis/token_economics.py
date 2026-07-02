@@ -48,9 +48,10 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
 
 __all__ = [
     "DEFAULT_BRIEF_LAYER",
@@ -59,11 +60,13 @@ __all__ = [
     "MatchupOutcome",
     "SessionRecord",
     "SystemEconomics",
+    "TournamentSummary",
     "WinRate",
     "build_matchups",
     "economics_by_system",
     "efficiency_score",
     "matchup_count",
+    "summarize_tournament",
     "tally",
     "tally_by_competitor",
     "tokens_per_resolved_point",
@@ -573,3 +576,58 @@ def matchup_count(n_backend_models: int, n_tasks: int, n_competitors: int) -> in
         msg = "sweep dimensions must be non-negative"
         raise ValueError(msg)
     return n_backend_models * n_tasks * n_competitors
+
+
+@dataclass(frozen=True, slots=True)
+class TournamentSummary:
+    """The full win-rate picture of a token-economics sweep in one object.
+
+    Bundles the overall aggregate (``tab:tok_context_winrate``) with the
+    per-competitor breakdown (``tab:tok_context_by_competitor``) so a caller reads
+    the whole tournament from a single facade.
+
+    Parameters
+    ----------
+    overall
+        Win/loss/tie counts over every matchup.
+    by_competitor
+        Per-competitor win rates, keyed by competitor name (read-only view).
+    """
+
+    overall: WinRate
+    by_competitor: Mapping[str, WinRate]
+
+    @property
+    def win_rate(self) -> float:
+        """Overall share of matchups the typed store won (``2880 / 3600 = 0.800``)."""
+        return self.overall.rate
+
+
+def summarize_tournament(
+    sessions: Iterable[SessionRecord],
+    *,
+    brief_layer: str = DEFAULT_BRIEF_LAYER,
+) -> TournamentSummary:
+    """Run the whole tournament and bundle its win-rate outputs.
+
+    A one-call facade over :func:`build_matchups`, :func:`tally` and
+    :func:`tally_by_competitor` reproducing ``tab:tok_context_winrate`` and
+    ``tab:tok_context_by_competitor`` together (Section ``sec:tokecon``).
+
+    Parameters
+    ----------
+    sessions
+        Session records for the sweep.
+    brief_layer
+        The context-layer name treated as the typed store under test.
+
+    Returns
+    -------
+    TournamentSummary
+        The overall and per-competitor win rates.
+    """
+    matchups = build_matchups(sessions, brief_layer=brief_layer)
+    return TournamentSummary(
+        overall=tally(matchups),
+        by_competitor=MappingProxyType(tally_by_competitor(matchups)),
+    )
