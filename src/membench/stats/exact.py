@@ -22,9 +22,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from scipy import stats
+
 __all__ = [
     "ExactBinomialInterval",
     "McNemarExactResult",
+    "clopper_pearson",
 ]
 
 
@@ -90,3 +93,65 @@ class McNemarExactResult:
     b: int
     c: int
     method: str = "mcnemar_exact"
+
+
+def clopper_pearson(successes: int, n: int, *, alpha: float = 0.05) -> ExactBinomialInterval:
+    r"""Compute the exact Clopper--Pearson interval via the Beta-quantile formulation.
+
+    The interval inverts the binomial tail tests directly. Writing ``s`` for the
+    number of successes, the equal-tailed exact limits are the Beta quantiles
+
+    .. math::
+
+        L = B^{-1}(\alpha/2;\; s,\; n - s + 1), \qquad
+        U = B^{-1}(1 - \alpha/2;\; s + 1,\; n - s),
+
+    with the boundary conventions :math:`L = 0` when ``s == 0`` and
+    :math:`U = 1` when ``s == n``. The Beta form is an identity, not an
+    approximation: :math:`P(X \ge s \mid p) = I_p(s, n - s + 1)` (the regularized
+    incomplete Beta function), so the quantile solves the tail equation exactly.
+    At the boundary the interval collapses to a closed form -- for ``s == n``,
+    :math:`L = (\alpha/2)^{1/n}`, which is the paper's worked example (j):
+    40/40 recovered chains give lower limit :math:`0.025^{1/40} = 0.912`
+    (Figure fig:chain).
+
+    Parameters
+    ----------
+    successes : int
+        Number of successes, ``0 <= successes <= n``.
+    n : int
+        Number of trials, ``n >= 1``.
+    alpha : float, optional
+        Total two-sided error rate in ``(0, 1)`` (default ``0.05`` for a 95%
+        interval).
+
+    Returns
+    -------
+    ExactBinomialInterval
+        The exact equal-tailed interval; coverage is guaranteed to be at least
+        ``1 - alpha`` for every ``n`` and true ``p`` (conservative).
+    """
+    if n < 1:
+        raise ValueError("n (number of trials) must be >= 1")
+    if not 0 <= successes <= n:
+        raise ValueError("require 0 <= successes <= n")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
+
+    if successes == 0:
+        low = 0.0
+    else:
+        low = float(stats.beta.ppf(alpha / 2.0, successes, n - successes + 1))
+    if successes == n:
+        high = 1.0
+    else:
+        high = float(stats.beta.ppf(1.0 - alpha / 2.0, successes + 1, n - successes))
+
+    return ExactBinomialInterval(
+        estimate=successes / n,
+        low=low,
+        high=high,
+        successes=successes,
+        n=n,
+        alpha=alpha,
+    )
