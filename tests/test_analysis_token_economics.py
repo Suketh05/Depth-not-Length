@@ -27,11 +27,13 @@ from membench.analysis.token_economics import (
     MatchupOutcome,
     SessionRecord,
     SystemEconomics,
+    TournamentSummary,
     WinRate,
     build_matchups,
     economics_by_system,
     efficiency_score,
     matchup_count,
+    summarize_tournament,
     tally,
     tally_by_competitor,
     tokens_per_resolved_point,
@@ -473,6 +475,32 @@ class TestMatchupCount:
     def test_negative_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-negative"):
             matchup_count(-1, 30, 10)
+
+
+class TestSummarizeTournament:
+    def test_bundles_overall_and_per_competitor(self) -> None:
+        summary = summarize_tournament(_full_sweep_sessions())
+        assert isinstance(summary, TournamentSummary)
+        assert summary.overall.wins == BRIEF_WINS
+        assert summary.overall.total == TOTAL_MATCHUPS
+        assert summary.win_rate == 0.8
+        assert set(summary.by_competitor) == set(COMPETITOR_WINS)
+        for competitor, win_rate in summary.by_competitor.items():
+            assert win_rate.wins == COMPETITOR_WINS[competitor]
+        # Agrees with calling the underlying functions directly.
+        matchups = build_matchups(_full_sweep_sessions())
+        assert summary.overall == tally(matchups)
+        assert dict(summary.by_competitor) == tally_by_competitor(matchups)
+
+    def test_by_competitor_view_is_read_only(self) -> None:
+        summary = summarize_tournament(_full_sweep_sessions())
+        with pytest.raises(TypeError):
+            summary.by_competitor["mem0"] = WinRate(0, 0, 0)  # type: ignore[index]
+
+    def test_empty_sweep(self) -> None:
+        summary = summarize_tournament([])
+        assert summary.overall == WinRate(0, 0, 0)
+        assert dict(summary.by_competitor) == {}
 
 
 class TestEconomicsBySystem:
