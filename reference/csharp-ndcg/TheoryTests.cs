@@ -215,4 +215,30 @@ public class TheoryTests
         Assert.Null(Theory.UseFactor(0.0, 0.0));
         Assert.Null(Theory.UseFactor(0.5, 0.0));
     }
+
+    // ---- B.3 scorecard tally (tab:scorecard) ----
+
+    [Fact]
+    public void ScorecardTallyIsFortyOne()
+    {
+        // Paper tab:scorecard: 22 wins + 14 marginal + 5 losses = 41 axes.
+        Assert.Equal(41, Theory.ScorecardTotal(22, 14, 5));
+    }
+
+    // ---- domain guards (golden-pack cross-cutting note 4) ----
+
+    [Fact]
+    public void DomainGuardsReject()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.SimilarityRecovery(0, Calib));   // d >= 1
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.StructuredRecovery(1, 0.0));      // q > 0
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.StructuredRecovery(1, 1.5));      // q <= 1
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.BinaryEntropy(-0.1));             // p in [0,1]
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.BinaryEntropy(1.1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.ContextFreeFloor(1));             // K >= 2
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.FindCrossoverDepth(Calib, -0.1, 5)); // tau >= 0
+        Assert.Throws<ArgumentOutOfRangeException>(() => Theory.OverheadRatio(1.0, 0.0));         // V > 0
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => Theory.SimilarityRecovery(1, new SurvivalModel(0.0, 0.6, 0.9)));               // s0 > 0
+    }
 }
