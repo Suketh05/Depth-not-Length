@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from membench.stats.exact import (
@@ -19,6 +20,7 @@ from membench.stats.exact import (
     McNemarExactResult,
     clopper_pearson,
     mcnemar_exact,
+    mcnemar_exact_from_outcomes,
 )
 
 
@@ -298,3 +300,66 @@ class TestMcNemarDegenerateAndValidation:
             mcnemar_exact(-1, 3)
         with pytest.raises(ValueError, match="non-negative"):
             mcnemar_exact(3, -1)
+
+
+class TestMcNemarFromOutcomes:
+    """Paired-outcome driver, including the paper's fig:forest boundary cell.
+
+    The fig:forest caption's headline depth-3 contrast is Brief 40/40 vs dense
+    27/40. Because Brief is correct on EVERY task, the discordant table is
+    forced: all 13 dense failures are Brief-only wins (b=13, c=0), and the
+    exact McNemar p-value is
+
+        p = 2 * C(13,0) / 2^13 = 2/8192 = 1/4096 = 0.000244140625,
+
+    comfortably significant -- the exact-test reading of the boundary cell the
+    caption says must not be read off the degenerate BCa bootstrap. (The
+    caption's own "z=3.94, p<1e-4" is the *two-proportion z* companion, a
+    different test; we do not assert its p here.)
+    """
+
+    def test_forest_boundary_cell_brief_40_40_vs_dense_27_40(self) -> None:
+        rng = np.random.default_rng(20260628)  # placement of dense failures
+        brief = [True] * 40
+        dense = np.array([True] * 27 + [False] * 13)
+        rng.shuffle(dense)  # order must not matter, only the counts
+        res = mcnemar_exact_from_outcomes(brief, dense.tolist())
+        assert (res.b, res.c) == (13, 0)
+        assert res.statistic == 13.0
+        assert res.p_value == 1 / 4096
+        assert res.mid_p == 1 / 8192
+
+    def test_wrapper_matches_direct_counts(self) -> None:
+        # Hand-tallied vector: tasks 0-1 concordant-correct, 2 concordant-wrong,
+        # 3-4 A-only (b=2), 5 B-only (c=1).
+        a = [True, True, False, True, True, False]
+        b = [True, True, False, False, False, True]
+        res = mcnemar_exact_from_outcomes(a, b)
+        assert (res.b, res.c) == (2, 1)
+        assert res == mcnemar_exact(2, 1)
+
+    def test_concordant_pairs_are_ignored(self) -> None:
+        # Padding both arms with shared successes/failures must not move p.
+        base_a = [True, False, True] * 4  # b as below
+        base_b = [False, False, True] * 4
+        padded_a = base_a + [True] * 50 + [False] * 50
+        padded_b = base_b + [True] * 50 + [False] * 50
+        assert mcnemar_exact_from_outcomes(base_a, base_b) == mcnemar_exact_from_outcomes(
+            padded_a, padded_b
+        )
+
+    def test_seeded_scenario_matches_hand_tally(self) -> None:
+        # Deterministic simulated 200-task paired run: tally b and c with an
+        # explicit loop (independent of the module's vectorized path).
+        rng = np.random.default_rng(7)
+        a = rng.random(200) < 0.85
+        b = rng.random(200) < 0.70
+        b_only = sum(1 for x, y in zip(a, b, strict=True) if x and not y)
+        c_only = sum(1 for x, y in zip(a, b, strict=True) if y and not x)
+        res = mcnemar_exact_from_outcomes(a.tolist(), b.tolist())
+        assert (res.b, res.c) == (b_only, c_only)
+        assert res.p_value == mcnemar_exact(b_only, c_only).p_value
+
+    def test_unequal_lengths_rejected(self) -> None:
+        with pytest.raises(ValueError, match="paired"):
+            mcnemar_exact_from_outcomes([True, False], [True])
