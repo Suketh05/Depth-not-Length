@@ -232,14 +232,13 @@ def render_capture_table(rows: Sequence[CaptureRow]) -> str:
     header = f"{'retriever':<{name_width}}  {'condition':<{cond_width}}  " + "  ".join(
         f"{f'd{d}':>5}" for d in depths
     )
-    lines = [header]
+    lines = [header.rstrip()]
     for retriever in retrievers:
         for condition in conditions:
             values = []
             for depth in depths:
                 cell = cells.get((retriever, condition, depth))
                 values.append("   --" if cell is None else f"{cell:>5.2f}")
-            lines.append(
-                f"{retriever:<{name_width}}  {condition:<{cond_width}}  " + "  ".join(values)
-            )
+            line = f"{retriever:<{name_width}}  {condition:<{cond_width}}  " + "  ".join(values)
+            lines.append(line.rstrip())
     return "\n".join(lines)

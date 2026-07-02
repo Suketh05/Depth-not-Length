@@ -21,6 +21,9 @@ import pytest
 
 from membench.analysis.capture_experiment import (
     CAPTURE_RETRIEVERS,
+    CaptureRow,
+    capture_table,
+    render_capture_table,
     run_capture_experiment,
 )
 from membench.datasets.capture_conditions import (
@@ -419,3 +422,71 @@ class TestDriver:
 
     def test_default_retrievers_are_the_tabcapexp_column(self) -> None:
         assert CAPTURE_RETRIEVERS == ("brief_graph_3hop", "bm25", "tfidf", "dense")
+
+
+def _row(
+    retriever: str = "bm25",
+    condition: str = "captured",
+    depth: int = 1,
+    task_id: str = "t0",
+    recall: float = 1.0,
+) -> CaptureRow:
+    return CaptureRow(
+        retriever=retriever,
+        condition=condition,
+        depth=depth,
+        task_id=task_id,
+        recall=recall,
+        chain_recovered=recall == 1.0,
+        n_gold=1,
+        n_retrieved=1,
+    )
+
+
+class TestAggregation:
+    def test_cell_mean_golden(self) -> None:
+        # Hand-computed: recalls 1.0, 0.0, 0.5 in one cell
+        # => mean = 1.5 / 3 = 0.5 exactly.
+        rows = [
+            _row(task_id="t0", recall=1.0),
+            _row(task_id="t1", recall=0.0),
+            _row(task_id="t2", recall=0.5),
+        ]
+        assert capture_table(rows) == {("bm25", "captured", 1): 0.5}
+
+    def test_cells_keyed_by_retriever_condition_depth(self) -> None:
+        rows = [
+            _row(retriever="bm25", condition="captured", depth=1, recall=1.0),
+            _row(retriever="bm25", condition="raw_scattered", depth=1, recall=0.0),
+            _row(retriever="brief_graph_3hop", condition="captured", depth=2, recall=1.0),
+        ]
+        table = capture_table(rows)
+        assert table[("bm25", "captured", 1)] == 1.0
+        assert table[("bm25", "raw_scattered", 1)] == 0.0
+        assert table[("brief_graph_3hop", "captured", 2)] == 1.0
+        assert len(table) == 3
+
+    def test_empty_rows_empty_table(self) -> None:
+        assert capture_table([]) == {}
+
+    def test_render_matches_tabcapexp_shape(self) -> None:
+        # Two retrievers x three conditions x d1/d2, one row each; missing
+        # cells render as --; cells carry the table's 2-dp precision.
+        rows = []
+        for retriever in ("brief_graph_3hop", "bm25"):
+            for condition in _CONDITIONS:
+                rows.append(_row(retriever=retriever, condition=condition, depth=1, recall=1.0))
+        rows.append(_row(retriever="bm25", condition="captured", depth=2, recall=0.25))
+        text = render_capture_table(rows)
+        lines = text.splitlines()
+        assert lines[0].split() == ["retriever", "condition", "d1", "d2"]
+        # 2 retrievers x 3 conditions data lines, conditions in paper order
+        assert len(lines) == 1 + 6
+        assert [ln.split()[1] for ln in lines[1:4]] == list(_CONDITIONS)
+        bm25_captured = next(ln for ln in lines if ln.split()[:2] == ["bm25", "captured"])
+        assert bm25_captured.split()[2:] == ["1.00", "0.25"]
+        # every non-measured d2 cell is a dash
+        assert sum(ln.count("--") for ln in lines) == 5
+
+    def test_render_empty_rows_is_header_only(self) -> None:
+        assert render_capture_table([]).splitlines() == ["retriever  condition"]
