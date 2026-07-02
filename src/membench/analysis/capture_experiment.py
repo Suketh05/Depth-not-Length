@@ -42,6 +42,7 @@ aggregation from whatever corpus and parameters it is given.
 
 from __future__ import annotations
 
+import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -63,6 +64,8 @@ __all__ = [
     "DEFAULT_DEPTHS",
     "DEFAULT_PER_DEPTH",
     "CaptureRow",
+    "capture_table",
+    "render_capture_table",
     "run_capture_experiment",
 ]
 
@@ -179,3 +182,64 @@ def run_capture_experiment(
                     )
                 )
     return rows
+
+
+def capture_table(rows: Sequence[CaptureRow]) -> dict[tuple[str, str, int], float]:
+    """Aggregate rows into the Table ``tab:capexp`` cells: mean recall per cell.
+
+    Parameters
+    ----------
+    rows
+        Rows from :func:`run_capture_experiment`.
+
+    Returns
+    -------
+    dict
+        ``(retriever, condition, depth) -> mean recall`` over the tasks in that
+        cell -- exactly the quantity a Table ``tab:capexp`` cell reports.
+    """
+    groups: dict[tuple[str, str, int], list[float]] = {}
+    for row in rows:
+        groups.setdefault((row.retriever, row.condition, row.depth), []).append(row.recall)
+    return {key: statistics.mean(values) for key, values in groups.items()}
+
+
+def render_capture_table(rows: Sequence[CaptureRow]) -> str:
+    """Render rows as a plain-text Table ``tab:capexp``: retriever x condition x depth.
+
+    Retrievers appear in first-appearance order, conditions in
+    :class:`CaptureCondition` declaration order (the paper's degradation
+    order), depths sorted ascending; cells are mean recall to two decimals,
+    matching the table's precision. Cells with no rows render as ``--``.
+
+    Parameters
+    ----------
+    rows
+        Rows from :func:`run_capture_experiment`.
+
+    Returns
+    -------
+    str
+        A fixed-width text table, one line per (retriever, condition).
+    """
+    cells = capture_table(rows)
+    retrievers = list(dict.fromkeys(row.retriever for row in rows))
+    depths = sorted({row.depth for row in rows})
+    conditions = [c.value for c in CaptureCondition]
+
+    name_width = max([len("retriever"), *(len(r) for r in retrievers)], default=len("retriever"))
+    cond_width = max(len("condition"), *(len(c) for c in conditions))
+    header = f"{'retriever':<{name_width}}  {'condition':<{cond_width}}  " + "  ".join(
+        f"{f'd{d}':>5}" for d in depths
+    )
+    lines = [header]
+    for retriever in retrievers:
+        for condition in conditions:
+            values = []
+            for depth in depths:
+                cell = cells.get((retriever, condition, depth))
+                values.append("   --" if cell is None else f"{cell:>5.2f}")
+            lines.append(
+                f"{retriever:<{name_width}}  {condition:<{cond_width}}  " + "  ".join(values)
+            )
+    return "\n".join(lines)
