@@ -120,5 +120,47 @@ public static class Theory
         return Math.Pow(q, d);
     }
 
+    // ---- A.3 gap, overhead, and crossover (eq:gd / Prop prop:cross) ----
+
+    /// <summary>
+    /// Structured advantage g(d) = P_ret^struct(d) - P_ret^sim(d) = q^d - s0^d*rho^{d(d+1)/2}
+    /// (eq:gd). Unimodal in d. At the paper calibration: g(1)=0.501, g(2)=0.79352613...,
+    /// which the paper reports as the 2-dp roundings g(1)~0.50, g(2)~0.79 (Prop prop:cross).
+    /// </summary>
+    public static double Gap(int d, SurvivalModel model)
+        => StructuredRecovery(d, model.Q) - SimilarityRecovery(d, model);
+
+    /// <summary>
+    /// Overhead ratio tau = W / V (retrieval work over value-of-context). golden pack A.3:
+    /// overhead_ratio(2.0, 8.0) = 0.25.
+    /// </summary>
+    public static double OverheadRatio(double workW, double valueV)
+    {
+        if (valueV <= 0.0)
+            throw new ArgumentOutOfRangeException(nameof(valueV), valueV, "value V must be > 0");
+        return workW / valueV;
+    }
+
+    /// <summary>Net value gain V*g(d) - W (crossover.py::net_value_gain).</summary>
+    public static double NetValueGain(int d, SurvivalModel model, double valueV, double workW)
+        => valueV * Gap(d, model) - workW;
+
+    /// <summary>
+    /// Smallest integer depth d in 1..maxDepth whose structured advantage strictly exceeds
+    /// the overhead tau: d* = min{ d : g(d) &gt; tau } (crossover.py::find_crossover_depth,
+    /// strict-win semantics). Returns null if no depth wins. At calibration, tau=0 gives
+    /// d*=1 (structure already wins at d=1 since g(1)=0.501&gt;0); the calibrated d*=2 holds
+    /// exactly on tau in [0.501, 0.79352613) (Prop prop:cross "d*=2 for 0.50 &lt; tau &lt;= 0.79").
+    /// </summary>
+    public static int? FindCrossoverDepth(SurvivalModel model, double tau, int maxDepth)
+    {
+        RequireModel(model);
+        RequireTau(tau);
+        for (int d = 1; d <= maxDepth; d++)
+            if (Gap(d, model) > tau)
+                return d;
+        return null;
+    }
+
     // === derivations appended below ===
 }
