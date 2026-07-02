@@ -95,3 +95,15 @@ INSERT INTO entity_objects (id, entity_type, entity_id, kind, canonical_type, ti
   ('d-gov-2', 'decision', 'D-1002', 'source', 'decision', 'Session guard requires a signed, rotating key', 7, 3),
   ('d-gov-3', 'decision', 'D-1003', 'source', 'decision', 'GOVERNING: key rotation cadence is fixed at 24h', 3, 2);
 
+-- ---------------------------------------------------------------------------
+-- SEED 2/4 -- The 'constrains' governing chain edges: q-task -> d1 -> d2 -> d3.
+-- ---------------------------------------------------------------------------
+-- Edge direction follows traverseEntityGraph's forward walk (source = the node
+-- you traverse FROM). Each hop is an explicit, confirmed, full-confidence typed
+-- link -- the "steady per-hop cost" traversal of thm:struct (q^d recovery),
+-- contrasted below with the super-geometric similarity decay of thm:sim.
+INSERT INTO entity_link (id, source_entity_object_id, target_entity_object_id, relationship_type, status, confidence, match_method) VALUES
+  ('e-gov-1', 'q-task',  'd-gov-1', 'constrains', 'confirmed', 1.0, 'explicit'),
+  ('e-gov-2', 'd-gov-1', 'd-gov-2', 'constrains', 'confirmed', 1.0, 'explicit'),
+  ('e-gov-3', 'd-gov-2', 'd-gov-3', 'constrains', 'confirmed', 1.0, 'explicit');
+
