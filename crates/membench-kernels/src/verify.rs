@@ -127,6 +127,142 @@ pub fn recovery_gap(d: f64, s0: f64, rho: f64, q: f64) -> PyResult<f64> {
     Ok(recovery_gap_impl(d, s0, rho, q))
 }
 
+/// Outcome of a crossover scan, mirroring `crossover.CrossoverResult`.
+struct CrossoverOutcome {
+    exists: bool,
+    d_star: i64,
+    d_star_continuous: f64,
+    win_lo: i64,
+    win_hi: i64,
+    peak_depth: i64,
+    g_curve: Vec<f64>,
+}
+
+/// Locate the crossover depth `d*` for overhead ratio `tau`, verifying
+/// `membench.theory.crossover.find_crossover_depth` (paper Prop `prop:cross`).
+///
+/// Scans integer depths `1..=max_depth` for the contiguous region where
+/// `g(d) > tau`, takes its smallest integer as `d*`, and refines a continuous
+/// crossover on the rising edge by bisection (the reference uses Brent's method;
+/// both converge to the same simple root of `g(d) - tau`). None-valued fields are
+/// sentinelled: `d_star = -1`, `d_star_continuous = NaN`, `win_lo = win_hi = -1`.
+fn crossover_search_impl(
+    s0: f64,
+    rho: f64,
+    q: f64,
+    tau: f64,
+    max_depth: i64,
+) -> Result<CrossoverOutcome, String> {
+    if tau < 0.0 || tau.is_nan() {
+        return Err(format!("tau must be non-negative, got {tau}"));
+    }
+    if max_depth < 1 {
+        return Err(format!("max_depth must be >= 1, got {max_depth}"));
+    }
+
+    let g = |d: f64| recovery_gap_impl(d, s0, rho, q);
+
+    let g_curve: Vec<f64> = (1..=max_depth).map(|d| g(d as f64)).collect();
+
+    // peak = first depth attaining the maximum (np.argmax semantics).
+    let mut peak_idx = 0usize;
+    for (i, &v) in g_curve.iter().enumerate() {
+        if v > g_curve[peak_idx] {
+            peak_idx = i;
+        }
+    }
+    let peak_depth = (peak_idx + 1) as i64;
+
+    // First integer depth with g(d) > tau (np.argmax over the boolean mask).
+    let first = g_curve.iter().position(|&v| v > tau);
+    let Some(first_idx) = first else {
+        return Ok(CrossoverOutcome {
+            exists: false,
+            d_star: -1,
+            d_star_continuous: f64::NAN,
+            win_lo: -1,
+            win_hi: -1,
+            peak_depth,
+            g_curve,
+        });
+    };
+    let d_star = (first_idx + 1) as i64;
+
+    // Contiguous win region starting at d_star (a closed interval for q < 1).
+    let mut last_idx = first_idx;
+    while last_idx + 1 < g_curve.len() && g_curve[last_idx + 1] > tau {
+        last_idx += 1;
+    }
+    let win_hi = (last_idx + 1) as i64;
+
+    // Continuous crossover on the rising edge: g(d) - tau changes sign in
+    // (d_star - 1, d_star] unless the model already wins at d = 1.
+    let lo = (d_star - 1) as f64;
+    let d_continuous = if lo < 1e-9 || g(lo) - tau >= 0.0 {
+        d_star as f64
+    } else {
+        bisect_root(&g, tau, lo, d_star as f64)
+    };
+
+    Ok(CrossoverOutcome {
+        exists: true,
+        d_star,
+        d_star_continuous: d_continuous,
+        win_lo: d_star,
+        win_hi,
+        peak_depth,
+        g_curve,
+    })
+}
+
+/// Bisection root of `g(d) - tau` on `[lo, hi]`, where `g(lo) < tau < g(hi)`.
+///
+/// Iterated to machine-precision bracket width so the returned root matches the
+/// reference's Brent solution to well within the parity tolerance.
+fn bisect_root(g: &impl Fn(f64) -> f64, tau: f64, mut lo: f64, mut hi: f64) -> f64 {
+    let f = |d: f64| g(d) - tau;
+    for _ in 0..200 {
+        let mid = 0.5 * (lo + hi);
+        if hi - lo <= f64::EPSILON * hi.abs().max(1.0) {
+            return mid;
+        }
+        if f(mid) > 0.0 {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
+/// Crossover scan; returns `(exists, d_star, d_star_continuous, win_lo, win_hi,
+/// peak_depth, g_curve)` with `-1`/`NaN` sentinels when no crossover exists.
+/// See [`crossover_search_impl`].
+#[pyfunction]
+#[pyo3(signature = (s0, rho, q, tau, max_depth=64))]
+// The flat tuple is the deliberate wire format for the Python parity test, which
+// unpacks it field-by-field against `CrossoverResult`; a struct would need a
+// pyclass round-trip that adds no clarity here.
+#[allow(clippy::type_complexity)]
+pub fn crossover_search(
+    s0: f64,
+    rho: f64,
+    q: f64,
+    tau: f64,
+    max_depth: i64,
+) -> PyResult<(bool, i64, f64, i64, i64, i64, Vec<f64>)> {
+    let o = crossover_search_impl(s0, rho, q, tau, max_depth).map_err(to_py_err)?;
+    Ok((
+        o.exists,
+        o.d_star,
+        o.d_star_continuous,
+        o.win_lo,
+        o.win_hi,
+        o.peak_depth,
+        o.g_curve,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +371,58 @@ mod tests {
         assert!(structured_recovery_impl(1, 0.0).is_err());
         assert!(structured_recovery_impl(1, 1.5).is_err());
         assert!(similarity_recovery_impl(1, 0.0, 0.67).is_err());
+    }
+
+    // ---- Crossover (golden_pack.md A.3, paper prop:cross) ----
+
+    // Calibrated d* = 2: strict-win when g(1) <= tau < g(2), i.e.
+    // tau in [0.501, 0.7935261299999999). Paper: "d*=2 for 0.50 < tau <= 0.79".
+    #[test]
+    fn crossover_calibrated_d_star_is_two() {
+        let o = crossover_search_impl(0.70, 0.67, 0.97, 0.6, 64).unwrap();
+        assert!(o.exists);
+        assert_eq!(o.d_star, 2);
+        // g(1)=0.501 < 0.6, g(2)=0.7935 > 0.6, so the win region opens at d=2.
+        assert_eq!(o.win_lo, 2);
+    }
+
+    // Closed-form crossover d* = 1 at tau = 0 (structure already wins at d=1,
+    // since g(1)=0.501 > 0). Peak advantage is at d=3 (g(3)=0.8816 is maximal).
+    #[test]
+    fn crossover_closed_form_d_star_is_one_at_zero_overhead() {
+        let o = crossover_search_impl(0.70, 0.67, 0.97, 0.0, 64).unwrap();
+        assert!(o.exists);
+        assert_eq!(o.d_star, 1);
+        assert_eq!(o.peak_depth, 3);
+        // lo = d_star - 1 = 0 < 1e-9, so the continuous root is pinned to d_star.
+        assert_eq!(o.d_star_continuous, 1.0);
+    }
+
+    // Continuous crossover root satisfies g(d_star_continuous) ~ tau (abs 1e-6),
+    // the invariant from test_theory_crossover.py.
+    #[test]
+    fn crossover_continuous_root_hits_tau() {
+        let (s0, rho, q, tau) = (0.70, 0.67, 0.97, 0.6);
+        let o = crossover_search_impl(s0, rho, q, tau, 64).unwrap();
+        let root = o.d_star_continuous;
+        assert!(root > 1.0 && root < 2.0, "root={root}");
+        assert!((recovery_gap_impl(root, s0, rho, q) - tau).abs() <= 1e-9);
+    }
+
+    // No crossover when the overhead exceeds the maximal gain: exists=false and
+    // every None field is sentinelled.
+    #[test]
+    fn crossover_absent_when_overhead_too_high() {
+        let o = crossover_search_impl(0.70, 0.67, 0.97, 2.0, 64).unwrap();
+        assert!(!o.exists);
+        assert_eq!(o.d_star, -1);
+        assert!(o.d_star_continuous.is_nan());
+        assert_eq!((o.win_lo, o.win_hi), (-1, -1));
+    }
+
+    #[test]
+    fn crossover_rejects_bad_domain() {
+        assert!(crossover_search_impl(0.7, 0.67, 0.97, -0.1, 64).is_err());
+        assert!(crossover_search_impl(0.7, 0.67, 0.97, 0.0, 0).is_err());
     }
 }
