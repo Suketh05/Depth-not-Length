@@ -45,7 +45,9 @@ from enum import Enum
 
 __all__ = [
     "InstanceResolution",
+    "ResolutionSummary",
     "TestStatus",
+    "resolution_rate",
     "resolve_instance",
 ]
 
@@ -127,3 +129,49 @@ def resolve_instance(
         pass_to_pass_ok=p2p_ok,
         unmet_tests=(*f2p_unmet, *p2p_unmet),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionSummary:
+    """Aggregate SWE-ContextBench resolution over a set of scored instances."""
+
+    n_resolved: int
+    n_total: int
+    rate: float  # n_resolved / n_total, in [0, 1]
+
+    @property
+    def percent(self) -> float:
+        r"""Resolution as a percentage (the ``tab:stdbench`` unit, e.g. ``47.3``)."""
+        return 100.0 * self.rate
+
+
+def resolution_rate(resolutions: Sequence[InstanceResolution]) -> ResolutionSummary:
+    r"""Return the resolution rate over scored instances (the ``tab:stdbench`` metric).
+
+    The SWE-ContextBench headline (Section~\ref{sec:pubbench}; ``Brief 47.3``) is the
+    fraction of instances that are :attr:`InstanceResolution.resolved`, reported as a
+    percentage via :attr:`ResolutionSummary.percent`. This function computes only the
+    arithmetic rate ``n_resolved / n_total``; it does not reproduce the paper's
+    ``47.3`` (that is the outcome of the full run), and the unit tests assert the
+    metric's own hand-computed identities, never the paper number.
+
+    Parameters
+    ----------
+    resolutions
+        Per-instance resolution outcomes (at least one).
+
+    Returns
+    -------
+    ResolutionSummary
+        Resolved count, total, and rate.
+
+    Raises
+    ------
+    ValueError
+        If ``resolutions`` is empty (a rate over no instances is undefined).
+    """
+    if not resolutions:
+        raise ValueError("resolution_rate needs at least one instance")
+    n_resolved = sum(1 for resolution in resolutions if resolution.resolved)
+    n_total = len(resolutions)
+    return ResolutionSummary(n_resolved=n_resolved, n_total=n_total, rate=n_resolved / n_total)
