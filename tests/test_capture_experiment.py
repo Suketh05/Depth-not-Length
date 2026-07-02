@@ -490,3 +490,82 @@ class TestAggregation:
 
     def test_render_empty_rows_is_header_only(self) -> None:
         assert render_capture_table([]).splitlines() == ["retriever  condition"]
+
+
+class TestEdgeCases:
+    def test_strip_covers_every_governance_edge_type(self) -> None:
+        # sec:capconds names constrains / supersedes / implements as the
+        # governance edges; the strip drops the whole `edges` key, so every
+        # relationship type is removed -- including the supersedes edge the
+        # supersession result depends on (a superseded pair must become two
+        # unlinked near-duplicates, the exact conflict similarity cannot
+        # adjudicate, cf. tab:super).
+        v2 = MemoryItem(
+            "decision-v2",
+            "Exports must call withAuditLog() with structured fields.",
+            metadata={"node_type": "governing", "edges": [("decision-v1", "supersedes")]},
+        )
+        v1 = MemoryItem(
+            "decision-v1",
+            "Exports must call withAuditLog() before writing.",
+            metadata={"node_type": "governing", "constrains": "decision-v2"},
+        )
+        impl = MemoryItem(
+            "impl",
+            "The exporter implements the audit rule.",
+            metadata={"node_type": "policy", "edges": [("decision-v2", "implements")]},
+        )
+        task = Task(
+            task_id="cap-super",
+            dataset="synthetic",
+            query="update the export path",
+            repo_ref="synthetic://capture",
+            memory_corpus=(v2, v1, impl),
+            governing_decisions=("decision-v2",),
+            depth=1,
+            spec_variant="stripped",
+            scorer="compliance",
+        )
+        stripped = strip_edges(task)
+        for item in stripped.memory_corpus:
+            assert "edges" not in item.metadata
+            assert "constrains" not in item.metadata
+
+    def test_shred_survives_an_empty_text_unit(self) -> None:
+        task = Task(
+            task_id="cap-empty",
+            dataset="synthetic",
+            query="anything",
+            repo_ref="synthetic://capture",
+            memory_corpus=(MemoryItem("d1", "", metadata={"node_type": "governing"}),),
+            governing_decisions=("d1",),
+            depth=1,
+            spec_variant="stripped",
+            scorer="compliance",
+        )
+        shredded = shred_scattered(task, 3, seed=0)
+        fragments = _shredded_fragments(shredded)["d1"]
+        assert len(fragments) == 1  # nothing to split; one (empty-payload) fragment
+        assert str(fragments[0].metadata["payload"]) == ""
+
+    def test_driver_handles_task_with_no_gold(self) -> None:
+        # Chance-floor convention of the metrics layer: with no gold ids recall
+        # is vacuously 1.0 and full-chain recovery is False (score_retrieval);
+        # the driver must pass that through rather than crash or mask it.
+        task = Task(
+            task_id="cap-nogold",
+            dataset="synthetic",
+            query="anything at all",
+            repo_ref="synthetic://capture",
+            memory_corpus=(MemoryItem("only", "an unrelated note"),),
+            governing_decisions=(),
+            depth=1,
+            spec_variant="stripped",
+            scorer="compliance",
+        )
+        rows = run_capture_experiment(("bm25",), tasks=[task], seed=0)
+        assert len(rows) == len(_CONDITIONS)
+        for row in rows:
+            assert row.n_gold == 0
+            assert row.recall == 1.0
+            assert row.chain_recovered is False
