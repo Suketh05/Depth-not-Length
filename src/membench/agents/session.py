@@ -37,8 +37,12 @@ __all__ = [
     "Session",
     "TurnRecord",
     "collapse_turns",
+    "competitor_saving_pct",
     "ledger_rows",
+    "matchup_winner",
     "paper_ledger_row",
+    "tokens_per_resolved_point",
+    "win_rate",
 ]
 
 
@@ -294,3 +298,72 @@ def collapse_turns(per_turn_tokens: Sequence[int]) -> PaperLedgerRow:
 def paper_ledger_row(session: Session) -> PaperLedgerRow:
     """Render a session in the column shape of ``tab:tok_agent_context_gpt55``."""
     return collapse_turns([record.turn_tokens for record in session.turns])
+
+
+# ---------------------------------------------------------------------------
+# Matchup and economics arithmetic (tab:tok_context_winrate and friends)
+# ---------------------------------------------------------------------------
+
+
+def matchup_winner(brief_tokens: int, competitor_tokens: int) -> str | None:
+    """Resolve one session-token matchup under the paper's rule.
+
+    A matchup is one (LLM x task x competing context layer) cell and "the
+    winner is the configuration that spent fewer total session tokens to the
+    same backend model" (``tab:tok_context_winrate``). Returns ``"brief"`` or
+    ``"competitor"``, or ``None`` on an exact tie. Ties are representable but
+    the paper's sweep recorded zero of them ("There are no ties: on every cell
+    one configuration is strictly cheaper").
+    """
+    if brief_tokens < 0 or competitor_tokens < 0:
+        raise ValueError("session token counts must be non-negative")
+    if brief_tokens < competitor_tokens:
+        return "brief"
+    if competitor_tokens < brief_tokens:
+        return "competitor"
+    return None
+
+
+def win_rate(wins: int, matchups: int) -> float:
+    """Fraction of matchups won: ``wins / matchups``.
+
+    The paper's headline is ``2880 / 3600 = 0.8`` exactly — an 80.0% session-
+    token win rate over 12 LLMs x 30 tasks x 10 context layers
+    (``tab:tok_context_winrate``); per-competitor rates over 360 matchups each
+    are in ``tab:tok_context_by_competitor``.
+    """
+    if matchups <= 0:
+        raise ValueError(f"matchups must be positive, got {matchups}")
+    if not 0 <= wins <= matchups:
+        raise ValueError(f"wins must be in [0, {matchups}], got {wins}")
+    return wins / matchups
+
+
+def competitor_saving_pct(brief_tokens: int, competitor_tokens: int) -> float:
+    """Competitor's token saving as a percentage of Brief's session spend.
+
+    ``100 * (brief_tokens - competitor_tokens) / brief_tokens`` — the
+    "Comp. saves %" column of the honest-losses table
+    (``tab:tok_context_brief_losses``), a margin on token cost, not on outcome.
+    Defined for the loss rows, where the competitor is cheaper; negative when
+    Brief was cheaper.
+    """
+    if brief_tokens <= 0:
+        raise ValueError(f"brief_tokens must be positive, got {brief_tokens}")
+    if competitor_tokens < 0:
+        raise ValueError("competitor_tokens must be non-negative")
+    return 100.0 * (brief_tokens - competitor_tokens) / brief_tokens
+
+
+def tokens_per_resolved_point(session_tokens: float, resolution_pct: float) -> float:
+    """Mean session tokens per point of resolution rate.
+
+    ``session_tokens / resolution_pct`` with resolution in percent — the
+    "Tok./res. pt" column of ``tab:tok_agent_economics`` (e.g. Brief:
+    12400 tokens at 48.0% resolution -> 258.3 tokens per resolved point).
+    """
+    if session_tokens < 0:
+        raise ValueError("session_tokens must be non-negative")
+    if resolution_pct <= 0:
+        raise ValueError(f"resolution_pct must be positive, got {resolution_pct}")
+    return session_tokens / resolution_pct
