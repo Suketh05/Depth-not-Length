@@ -13,6 +13,7 @@ Goldens come from two independent sources, never from running the module:
   results/data/paper_token_economics.csv is read directly, so these tests are
   the cross-check a reader runs against the paper.
 """
+
 from __future__ import annotations
 
 import csv
@@ -29,6 +30,7 @@ from membench.analysis.token_economics import (
     MatchupOutcome,
     SessionRecord,
     TournamentSummary,
+    competitor_savings_pct,
     decide_matchup,
     efficiency_score,
     pair_matchups,
@@ -495,3 +497,23 @@ class TestEfficiencyScore:
             tokens_per_resolved_point(0, 50.0)
         with pytest.raises(ValueError, match=r"\[0, 100\]"):
             tokens_per_resolved_point(1000, -0.1)
+
+
+class TestCompetitorSavingsPct:
+    """Loss margins quoted verbatim from tab:tok_context_brief_losses."""
+
+    def test_gpt53_codex_swe004_none_loss_row(self) -> None:
+        # GPT-5.3 Codex / swe-004 / none: Brief 1938 vs competitor 1593 tokens
+        # => 100 * (1938 - 1593) / 1938 = 17.80... (printed 17.8%).
+        assert round(competitor_savings_pct(1938, 1593), 1) == 17.8
+
+    def test_claude_opus_swe009_mem0_loss_row(self) -> None:
+        # Claude Opus 4.8 / swe-009 / Mem0: Brief 2428 vs 1995
+        # => 100 * (2428 - 1995) / 2428 = 17.83... (printed 17.8%).
+        assert round(competitor_savings_pct(2428, 1995), 1) == 17.8
+
+    def test_defined_only_on_loss_rows(self) -> None:
+        with pytest.raises(ValueError, match="loss rows only"):
+            competitor_savings_pct(1593, 1938)  # a Brief win
+        with pytest.raises(ValueError, match="loss rows only"):
+            competitor_savings_pct(2000, 2000)  # a tie
