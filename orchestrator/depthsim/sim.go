@@ -128,3 +128,28 @@ func (m Model) AnalyticCrossover(maxDepth int) int {
 	}
 	return 0
 }
+
+// splitMix64 mixes a 64-bit state into a well-distributed output (Steele,
+// Lea & Flood, "Fast Splittable Pseudorandom Number Generators", OOPSLA 2014).
+// It turns a small structured key (base seed, arm, depth, trial index) into a
+// high-entropy seed so adjacent trials do not produce correlated streams.
+func splitMix64(x uint64) uint64 {
+	x += 0x9e3779b97f4a7c15
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+	return x ^ (x >> 31)
+}
+
+// trialSeed derives the RNG seed for a single Monte-Carlo trial. It is a pure
+// function of (baseSeed, arm, depth, trial) and — crucially — does NOT depend on
+// which goroutine runs the trial. That is what makes the whole estimate
+// scheduling-independent: any partition of the trial indices across any number
+// of workers reseeds each trial identically, so the pooled success count is the
+// same for 1 worker or N workers.
+func trialSeed(baseSeed uint64, a Arm, depth, trial int) int64 {
+	h := splitMix64(baseSeed + 0x9e3779b97f4a7c15)
+	h = splitMix64(h + uint64(a) + 0x100)
+	h = splitMix64(h + uint64(depth) + 0x200)
+	h = splitMix64(h + uint64(trial))
+	return int64(h)
+}
