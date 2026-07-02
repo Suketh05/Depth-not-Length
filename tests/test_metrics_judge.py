@@ -266,6 +266,29 @@ class TestJudgeVsRuleAgreementEndToEnd:
         with pytest.raises(ValueError, match="align"):
             judge_vs_rule_agreement(StubJudge(), [_task(("D-001",))], [])
 
+    def test_eight_task_agreement_reaches_the_wilson_golden_through_the_pipeline(self) -> None:
+        # Six answers on which the stub judge and the rule scorer concur (three
+        # enforced, three absent) and two restated (gamed) answers on which only
+        # the judge dissents => 6/8 agreement, whose Wilson-95% CI is the golden
+        # pack (6, 8) literal. This ties the end-to-end machinery to the arithmetic.
+        answers = [
+            _ANSWER_ENFORCED,
+            _ANSWER_ENFORCED,
+            _ANSWER_ABSENT,
+            _ANSWER_ABSENT,
+            _ANSWER_ENFORCED,
+            _ANSWER_ABSENT,
+            _ANSWER_RESTATED,
+            _ANSWER_RESTATED,
+        ]
+        tasks = [_task(("D-001",), task_id=f"t-{i}") for i in range(len(answers))]
+        result = judge_vs_rule_agreement(StubJudge(), tasks, answers)
+        assert result.n_agree == 6
+        assert result.n_total == 8
+        assert result.judge_stricter == 2
+        assert result.rule_stricter == 0
+        assert result.ci == (0.40927543031016883, 0.9285207872478909)
+
 
 class _CannedClient(LLMClient):
     """An offline LLMClient that returns a fixed reply (no network, not live)."""
