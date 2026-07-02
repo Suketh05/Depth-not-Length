@@ -25,7 +25,9 @@ from membench.analysis.token_economics import (
     MatchupOutcome,
     SessionRecord,
     decide_matchup,
+    pair_matchups,
     session_tokens_from_turns,
+    sweep_matchup_count,
 )
 
 PAPER_CSV = Path(__file__).resolve().parents[1] / "results" / "data" / "paper_token_economics.csv"
@@ -125,3 +127,58 @@ class TestSessionTokensFromTurns:
     def test_rejects_non_positive_turn(self) -> None:
         with pytest.raises(ValueError, match="turn 2"):
             session_tokens_from_turns((1598, 0, 34))
+
+
+class TestSweepMatchupCount:
+    def test_paper_sweep_is_3600(self) -> None:
+        # tab:tok_context_winrate: 12 LLMs x 30 SWE agent tasks x 10 layers.
+        assert sweep_matchup_count(12, 30, 10) == 3600
+
+    def test_rejects_non_positive_dimension(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            sweep_matchup_count(12, 0, 10)
+
+
+class TestPairMatchups:
+    def test_pairs_every_competitor_session_with_its_cell(self) -> None:
+        briefs = [_brief("m1", "t1", 100), _brief("m1", "t2", 200)]
+        comps = [
+            _comp("mem0", "m1", "t1", 150),
+            _comp("zep", "m1", "t1", 90),
+            _comp("mem0", "m1", "t2", 250),
+        ]
+        matchups = pair_matchups(briefs, comps)
+        assert [(m.competitor, m.llm, m.task) for m in matchups] == [
+            ("mem0", "m1", "t1"),
+            ("zep", "m1", "t1"),
+            ("mem0", "m1", "t2"),
+        ]
+        assert [(m.brief_tokens, m.competitor_tokens) for m in matchups] == [
+            (100, 150),
+            (100, 90),
+            (200, 250),
+        ]
+
+    def test_empty_competitors_yield_empty_tournament(self) -> None:
+        assert pair_matchups([_brief("m1", "t1", 100)], []) == []
+
+    def test_missing_brief_cell_raises(self) -> None:
+        with pytest.raises(ValueError, match="no Brief session"):
+            pair_matchups([_brief("m1", "t1", 100)], [_comp("mem0", "m1", "t9", 150)])
+
+    def test_duplicate_brief_cell_raises(self) -> None:
+        with pytest.raises(ValueError, match="duplicate Brief"):
+            pair_matchups([_brief("m1", "t1", 100), _brief("m1", "t1", 110)], [])
+
+    def test_duplicate_competitor_session_raises(self) -> None:
+        with pytest.raises(ValueError, match="duplicate competitor"):
+            pair_matchups(
+                [_brief("m1", "t1", 100)],
+                [_comp("mem0", "m1", "t1", 150), _comp("mem0", "m1", "t1", 160)],
+            )
+
+    def test_brief_session_on_wrong_side_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not contain Brief"):
+            pair_matchups([_brief("m1", "t1", 100)], [_brief("m1", "t1", 150)])
+        with pytest.raises(ValueError, match="must have system"):
+            pair_matchups([_comp("mem0", "m1", "t1", 100)], [])
