@@ -12,9 +12,14 @@ from fractions import Fraction
 import pytest
 
 from membench.metrics.answer_scoring import (
+    AnswerJudge,
+    AnswerRecord,
+    JudgeVerdict,
+    TokenOverlapJudge,
     answer_exact_match,
     answer_tokens,
     fact_f1,
+    llm_judge_accuracy,
     normalize_answer,
     token_f1,
 )
@@ -139,3 +144,74 @@ class TestFactF1:
         assert result.n_predicted == 1
         assert result.n_gold == 1
         assert result.f1 == pytest.approx(1.0)
+
+
+class TestTokenOverlapJudge:
+    def test_exact_match_is_correct_with_full_score(self) -> None:
+        verdict = TokenOverlapJudge()("q", "Paris", "paris.")
+        assert verdict.correct is True
+        assert verdict.score == pytest.approx(1.0)
+
+    def test_partial_overlap_above_threshold_is_correct(self) -> None:
+        # gold [paris france], pred [paris]: F1 = 2*(1)*(1/2)/(1+1/2) = 2/3 >= 0.5.
+        verdict = TokenOverlapJudge(threshold=0.5)("q", "Paris France", "Paris")
+        assert verdict.score == pytest.approx(float(Fraction(2, 3)))
+        assert verdict.correct is True
+
+    def test_overlap_below_threshold_is_incorrect(self) -> None:
+        verdict = TokenOverlapJudge(threshold=0.9)("q", "Paris France", "Paris")
+        assert verdict.correct is False
+
+    def test_disjoint_answer_is_incorrect(self) -> None:
+        verdict = TokenOverlapJudge()("q", "Paris", "London")
+        assert verdict.correct is False
+        assert verdict.score == 0.0
+
+    def test_satisfies_answer_judge_protocol(self) -> None:
+        assert isinstance(TokenOverlapJudge(), AnswerJudge)
+
+    def test_threshold_out_of_range_raises(self) -> None:
+        with pytest.raises(ValueError, match="threshold"):
+            TokenOverlapJudge(threshold=1.5)
+
+
+class TestLlmJudgeAccuracy:
+    def test_three_of_four_correct_is_075(self) -> None:
+        # Deterministic default judge; 3 exact/near matches, 1 disjoint -> 3/4.
+        records = [
+            AnswerRecord("q1", "Paris", "paris"),
+            AnswerRecord("q2", "1999", "1999."),
+            AnswerRecord("q3", "blue", "blue"),
+            AnswerRecord("q4", "Monday", "Friday"),
+        ]
+        result = llm_judge_accuracy(records, TokenOverlapJudge())
+        assert result.n_correct == 3
+        assert result.n_total == 4
+        assert result.accuracy == pytest.approx(0.75)
+        assert len(result.verdicts) == 4
+
+    def test_all_correct_saturates_at_one(self) -> None:
+        records = [AnswerRecord("q", "a1 b2", "a1 b2"), AnswerRecord("q", "c3", "c3")]
+        assert llm_judge_accuracy(records, TokenOverlapJudge()).accuracy == pytest.approx(1.0)
+
+    def test_all_wrong_floors_at_zero(self) -> None:
+        records = [AnswerRecord("q", "alpha", "zeta"), AnswerRecord("q", "beta", "omega")]
+        assert llm_judge_accuracy(records, TokenOverlapJudge()).accuracy == 0.0
+
+    def test_empty_records_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            llm_judge_accuracy([], TokenOverlapJudge())
+
+    def test_custom_judge_hook_is_used_and_arm_blind(self) -> None:
+        # A stub live judge: correct iff the gold appears verbatim in the prediction.
+        # Its signature has no arm parameter, so it cannot condition on the arm.
+        def substring_judge(question: str, gold_answer: str, predicted_answer: str) -> JudgeVerdict:
+            hit = gold_answer.lower() in predicted_answer.lower()
+            return JudgeVerdict(correct=hit, score=1.0 if hit else 0.0, rationale="substring")
+
+        records = [
+            AnswerRecord("q1", "widget", "the widget is used"),
+            AnswerRecord("q2", "gadget", "no match here"),
+        ]
+        result = llm_judge_accuracy(records, substring_judge)
+        assert result.accuracy == pytest.approx(0.5)
