@@ -56,9 +56,12 @@ __all__ = [
     "JudgeCase",
     "JudgeConfig",
     "JudgeVerdict",
+    "RUBRIC_SYSTEM_PROMPT",
     "StubComplianceJudge",
     "TaskJudgeResult",
+    "build_judge_prompt",
     "judge_task",
+    "parse_judge_verdict",
 ]
 
 #: Presentation orders for the reference invariant vs. the agent answer inside the
@@ -443,3 +446,77 @@ def judge_task(judge: ComplianceJudge, response_text: str, task: Task) -> TaskJu
         rate=len(compliant_ids) / total,
         verdicts=tuple(verdicts),
     )
+
+
+#: The arm-blind judging rubric given to a live judge as the system prompt.
+#: It operationalises Section ``sec:grader``: check the decision's invariant on
+#: the output ("the rubric checks the decision's invariant on the output"), demand
+#: enforcement rather than restatement (the gaming threat of Section
+#: ``sec:gradervalidity``), and never speculate about which memory system produced
+#: the answer (arm-blindness). The fixed VERDICT/RATIONALE shape keeps parsing
+#: mechanical and the verdict boolean (bimodal grading, Figure
+#: ``fig:ecdf_compliance``).
+RUBRIC_SYSTEM_PROMPT = (
+    "You are a compliance grader for coding-agent outputs. You will see a TASK, a "
+    "GOVERNING DECISION stating an invariant that any acceptable answer must honour, "
+    "and an AGENT ANSWER. Decide whether the answer HONOURS the invariant: the "
+    "invariant must be enforced by the proposed change itself. Merely restating the "
+    "invariant, quoting it, or promising to skip it does NOT count as honouring it. "
+    "Judge only invariant compliance, not overall answer quality or correctness. "
+    "You are not told which memory or retrieval system produced the answer; do not "
+    "try to guess or reward any particular style. "
+    "Reply in exactly two lines:\n"
+    "VERDICT: COMPLIANT or VERDICT: NONCOMPLIANT\n"
+    "RATIONALE: <one sentence>"
+)
+
+_VERDICT_PATTERN = re.compile(r"VERDICT\s*:\s*(NON[\s-]?COMPLIANT|COMPLIANT)", re.IGNORECASE)
+_RATIONALE_PATTERN = re.compile(r"RATIONALE\s*:\s*(.+)", re.IGNORECASE | re.DOTALL)
+
+
+def build_judge_prompt(case: JudgeCase, config: JudgeConfig) -> tuple[str, str]:
+    """Render the (system, user) judge prompt for one case, arm-blind by input.
+
+    The user message contains only the three :class:`JudgeCase` fields (plus the
+    ground-truth decision id when present), laid out per ``config.prompt_order``:
+    ``"invariant_first"`` presents the governing decision before the agent answer,
+    ``"answer_first"`` swaps them. Section ``sec:gradervalidity`` names swapped
+    presentation order as a stability probe, so the order is an explicit, recorded
+    argument instead of a formatting accident. The task always leads, since both
+    blocks are read relative to it.
+    """
+    id_line = f" (id {case.decision_id})" if case.decision_id else ""
+    invariant_block = f"GOVERNING DECISION{id_line}:\n{case.invariant_text}"
+    answer_block = f"AGENT ANSWER:\n{case.answer_text}"
+    if config.prompt_order == "invariant_first":
+        first, second = invariant_block, answer_block
+    else:
+        first, second = answer_block, invariant_block
+    user = f"TASK:\n{case.task_query}\n\n{first}\n\n{second}"
+    return RUBRIC_SYSTEM_PROMPT, user
+
+
+def parse_judge_verdict(text: str, config: JudgeConfig) -> JudgeVerdict:
+    """Parse a live judge's raw output into a verdict; fail *closed* on garbage.
+
+    Accepts ``VERDICT: COMPLIANT`` / ``VERDICT: NONCOMPLIANT`` (case-insensitive,
+    tolerating ``NON-COMPLIANT``/``NON COMPLIANT``) anywhere in the text and takes
+    the rest of the ``RATIONALE:`` line as the rationale. Output with no parseable
+    verdict is graded non-compliant with ``parse_ok=False``: an unparseable grade
+    must never be silently promoted to a success (that would inflate the
+    compliance numerator of Equation ``eq:factor``), but it stays flagged on the
+    record so parse failures are auditable rather than folded into real misses.
+    """
+    match = _VERDICT_PATTERN.search(text)
+    if match is None:
+        snippet = text.strip()[:200]
+        return JudgeVerdict(
+            compliant=False,
+            rationale=f"unparseable judge output (failed closed): {snippet!r}",
+            config=config,
+            parse_ok=False,
+        )
+    compliant = match.group(1).upper() == "COMPLIANT"
+    rationale_match = _RATIONALE_PATTERN.search(text)
+    rationale = rationale_match.group(1).strip() if rationale_match else text.strip()
+    return JudgeVerdict(compliant=compliant, rationale=rationale, config=config)
