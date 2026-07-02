@@ -117,3 +117,32 @@ assert_close(dl$pooled,      0.2522272433828276,  1e-12, "DL:pooled")
 assert_close(dl$se,          0.11069648626900815, 1e-9,  "DL:SE")
 cat(sprintf("PASS (1) DerSimonian-Laird: Q=%.15g tau2=%.15g I2=%.15g pooled=%.16g\n",
             dl$Q, dl$tau2, dl$I2, dl$pooled))
+
+## ---------------------------------------------------------------------------
+## (2) Schuirmann's TOST for two means (Welch-Satterthwaite df)
+##     Cross-checks src/membench/stats/equivalence.py; golden pack C.1.
+##     Two one-sided tests against an equivalence margin +/- delta:
+##       diff     = mean_a - mean_b
+##       SE       = sqrt(sd_a^2/n_a + sd_b^2/n_b)
+##       df       = SE^4 / ( (sd_a^2/n_a)^2/(n_a-1) + (sd_b^2/n_b)^2/(n_b-1) )
+##       t_lower  = (diff + delta) / SE ; p_lower = P(T_df >  t_lower)
+##       t_upper  = (diff - delta) / SE ; p_upper = P(T_df <  t_upper)
+##       p_value  = max(p_lower, p_upper); equivalent iff p_value < alpha
+##     Equivalence is concluded only when BOTH one-sided tails reject, i.e.
+##     the larger tail probability is below alpha.
+## ---------------------------------------------------------------------------
+tost_two_means <- function(mean_a, sd_a, n_a, mean_b, sd_b, n_b, delta) {
+  va <- sd_a^2 / n_a
+  vb <- sd_b^2 / n_b
+  diff <- mean_a - mean_b
+  se <- sqrt(va + vb)
+  df <- (va + vb)^2 / (va^2 / (n_a - 1) + vb^2 / (n_b - 1))
+  t_lower <- (diff + delta) / se
+  t_upper <- (diff - delta) / se
+  p_lower <- pt(t_lower, df, lower.tail = FALSE)
+  p_upper <- pt(t_upper, df, lower.tail = TRUE)
+  list(diff = diff, se = se, df = df,
+       t_lower = t_lower, t_upper = t_upper,
+       p_lower = p_lower, p_upper = p_upper,
+       p_value = max(p_lower, p_upper))
+}
