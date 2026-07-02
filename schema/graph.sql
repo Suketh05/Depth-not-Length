@@ -82,3 +82,16 @@ CREATE INDEX idx_entity_link_target ON entity_link (target_entity_object_id);
 -- here. SQLite float64 == Python float64 for these products (abs err 0.0), and
 -- assertions still allow abs tol 1e-12 for portability across CI hosts.
 
+-- ---------------------------------------------------------------------------
+-- SEED 1/4 -- Governing decision chain nodes (a depth-3 causal chain).
+-- ---------------------------------------------------------------------------
+-- A single edit task ('q-task') whose correct action is governed by a decision
+-- three causal hops away ('d-gov-3'). This is the depth-3 regime the theory is
+-- about: the governing decision is NOT a function of the task surface alone
+-- (def:governed), so it must be reached by following typed links, not guessed.
+INSERT INTO entity_objects (id, entity_type, entity_id, kind, canonical_type, title, access_count, citation_count) VALUES
+  ('q-task',  'task',     'T-4821', 'source', 'task',     'Edit: swap checkout button click handler', 5, 0),
+  ('d-gov-1', 'decision', 'D-1001', 'source', 'decision', 'Checkout mutations go through the session guard', 9, 4),
+  ('d-gov-2', 'decision', 'D-1002', 'source', 'decision', 'Session guard requires a signed, rotating key', 7, 3),
+  ('d-gov-3', 'decision', 'D-1003', 'source', 'decision', 'GOVERNING: key rotation cadence is fixed at 24h', 3, 2);
+
