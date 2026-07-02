@@ -315,6 +315,60 @@ pub fn bm25_plus_scores(
     Ok(bm25_plus_scores_impl(&corpus, &query, k1, b, delta))
 }
 
+// ---------------------------------------------------------------------------
+// D. Retrieval scoring: Reciprocal Rank Fusion (rank_fusion_graph.py; Cormack 2009)
+// ---------------------------------------------------------------------------
+
+/// Reciprocal Rank Fusion `RRF(d) = sum_r 1/(k + rank_r(d))` over 1-based ranks.
+///
+/// Verifies `membench.retrieval.rank_fusion_graph.reciprocal_rank_fusion` (Cormack,
+/// Clarke & Buettcher, SIGIR 2009). A document contributes a term only for the
+/// rankings that contain it, so an item present in two lists is rewarded over one
+/// present in a single list at the same position — the property that lets RRF fuse
+/// incommensurable score scales using ranks alone. Returns ids in first-seen order
+/// (matching the reference dict's insertion order) with their fused scores.
+fn reciprocal_rank_fusion_impl(
+    rankings: &[Vec<String>],
+    k: i64,
+) -> Result<Vec<(String, f64)>, String> {
+    if k <= 0 {
+        return Err(format!("RRF k must be positive, got {k}"));
+    }
+    let kf = k as f64;
+    let mut order: Vec<String> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut scores: Vec<f64> = Vec::new();
+    for ranking in rankings {
+        for (rank0, item_id) in ranking.iter().enumerate() {
+            let rank = (rank0 + 1) as f64;
+            let contribution = 1.0 / (kf + rank);
+            match index.get(item_id) {
+                Some(&i) => scores[i] += contribution,
+                None => {
+                    index.insert(item_id.clone(), scores.len());
+                    order.push(item_id.clone());
+                    scores.push(contribution);
+                }
+            }
+        }
+    }
+    Ok(order.into_iter().zip(scores).collect())
+}
+
+/// RRF fusion; returns `(ids, scores)` in first-seen order. `k` must be positive.
+/// See [`reciprocal_rank_fusion_impl`].
+#[pyfunction]
+#[pyo3(signature = (rankings, k=60))]
+pub fn reciprocal_rank_fusion(
+    rankings: Vec<Vec<String>>,
+    k: i64,
+) -> PyResult<(Vec<String>, Vec<f64>)> {
+    let fused = reciprocal_rank_fusion_impl(&rankings, k).map_err(to_py_err)?;
+    let ids = fused.iter().map(|(id, _)| id.clone()).collect();
+    let scores = fused.iter().map(|(_, s)| *s).collect();
+    Ok((ids, scores))
+}
+
 /// Crossover scan; returns `(exists, d_star, d_star_continuous, win_lo, win_hi,
 /// peak_depth, g_curve)` with `-1`/`NaN` sentinels when no crossover exists.
 /// See [`crossover_search_impl`].
@@ -552,5 +606,63 @@ mod tests {
     #[test]
     fn bm25_plus_empty_corpus_is_empty() {
         assert!(bm25_plus_scores_impl(&[], &toks(&["beta"]), 1.5, 0.75, 1.0).is_empty());
+    }
+
+    // ---- Reciprocal Rank Fusion (golden_pack.md D.3, Cormack 2009) ----
+
+    fn rrf_score(fused: &[(String, f64)], id: &str) -> f64 {
+        fused.iter().find(|(k, _)| k == id).unwrap().1
+    }
+
+    // Rankings A=[a,b,c], B=[c,b] with k=60. The exact-fraction tie-break
+    // c=124/3843 > b=124/3844 (same numerator, smaller denominator) fixes the
+    // fused order [c, b, a]. Values asserted VERBATIM from golden_pack.md D.3.
+    #[test]
+    fn rrf_exact_fraction_tie_break_orders_c_over_b() {
+        let a = toks(&["a", "b", "c"]);
+        let b = toks(&["c", "b"]);
+        let fused = reciprocal_rank_fusion_impl(&[a, b], 60).unwrap();
+
+        let sa = rrf_score(&fused, "a");
+        let sb = rrf_score(&fused, "b");
+        let sc = rrf_score(&fused, "c");
+
+        // a = 1/61 = 63/3843; b = 2/62 = 124/3844 = 1/31; c = 1/63 + 1/61 = 124/3843.
+        assert!((sa - 1.0 / 61.0).abs() <= 1e-15);
+        assert!((sa - 0.01639344262295082).abs() <= 1e-15);
+        assert!((sb - 124.0 / 3844.0).abs() <= 1e-15);
+        assert!((sb - 0.03225806451612903).abs() <= 1e-15);
+        assert!((sc - (1.0 / 63.0 + 1.0 / 61.0)).abs() <= 1e-15);
+        assert!((sc - 0.032266458495966696).abs() <= 1e-15);
+
+        // The crux: c strictly beats b despite the shared numerator 124.
+        assert!(sc > sb, "c={sc} must beat b={sb}");
+
+        // First-seen order is [a, b, c]; the *ranked* order is [c, b, a].
+        assert_eq!(
+            fused.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+        let mut ranked: Vec<&(String, f64)> = fused.iter().collect();
+        ranked.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap());
+        assert_eq!(
+            ranked.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            vec!["c", "b", "a"]
+        );
+    }
+
+    // Agreement golden: [[x,y],[x]] -> x = 2/61, y = 1/62.
+    #[test]
+    fn rrf_agreement_rewards_repeated_item() {
+        let fused = reciprocal_rank_fusion_impl(&[toks(&["x", "y"]), toks(&["x"])], 60).unwrap();
+        assert!((rrf_score(&fused, "x") - 2.0 / 61.0).abs() <= 1e-15);
+        assert!((rrf_score(&fused, "x") - 0.03278688524590164).abs() <= 1e-15);
+        assert!((rrf_score(&fused, "y") - 1.0 / 62.0).abs() <= 1e-15);
+    }
+
+    #[test]
+    fn rrf_rejects_nonpositive_k() {
+        assert!(reciprocal_rank_fusion_impl(&[toks(&["a"])], 0).is_err());
+        assert!(reciprocal_rank_fusion_impl(&[toks(&["a"])], -1).is_err());
     }
 }
