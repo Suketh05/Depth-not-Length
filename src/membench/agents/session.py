@@ -28,11 +28,17 @@ in ``tests/test_agents_session.py``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 __all__ = [
+    "PaperLedgerRow",
     "Session",
     "TurnRecord",
+    "collapse_turns",
+    "ledger_rows",
+    "paper_ledger_row",
 ]
 
 
@@ -192,3 +198,99 @@ class Session:
     def session_dollars(self) -> float:
         """Total session cost in dollars (sum of the per-turn costs)."""
         return sum(record.dollars for record in self.turns)
+
+
+# ---------------------------------------------------------------------------
+# Session ledger
+# ---------------------------------------------------------------------------
+
+
+def ledger_rows(session: Session) -> list[dict[str, Any]]:
+    """Return the per-turn token ledger of a session with cumulative columns.
+
+    One JSON-friendly row per turn: per-turn prompt/completion/total tokens and
+    dollars, plus running (cumulative) token and dollar sums. The final row's
+    cumulative values equal :attr:`Session.session_tokens` /
+    :attr:`Session.session_dollars` by construction — this is the "turn-by-turn
+    token ledger" the paper commits to publishing for every backend model
+    (``sec:tokecon``, closing paragraph).
+    """
+    rows: list[dict[str, Any]] = []
+    running_tokens = 0
+    running_dollars = 0.0
+    for record in session.turns:
+        running_tokens += record.turn_tokens
+        running_dollars += record.dollars
+        rows.append(
+            {
+                "task_id": session.task_id,
+                "arm": session.arm,
+                "model": session.model,
+                "turn": record.turn,
+                "prompt_tokens": record.prompt_tokens,
+                "completion_tokens": record.completion_tokens,
+                "turn_tokens": record.turn_tokens,
+                "dollars": record.dollars,
+                "cumulative_tokens": running_tokens,
+                "cumulative_dollars": running_dollars,
+                "resolved": record.resolved,
+            }
+        )
+    return rows
+
+
+@dataclass(frozen=True, slots=True)
+class PaperLedgerRow:
+    """One row in the presentation shape of ``tab:tok_agent_context_gpt55``.
+
+    The paper collapses a session's per-turn spend to four columns — Turn 1,
+    Turn 2, Turn 3, and "Turn 4+" (the sum of all remaining turns) — plus the
+    session total. Columns beyond the session's length are ``None`` (rendered
+    "---" in the paper; e.g. the 3-turn "Brief context" row has no Turn 4+).
+
+    The defining arithmetic identity, asserted against every published row in
+    the tests: ``turn1 + turn2 + turn3 + turn4_plus == session_tokens``
+    (treating ``None`` as 0).
+    """
+
+    turn1: int | None
+    turn2: int | None
+    turn3: int | None
+    turn4_plus: int | None
+    session_tokens: int
+
+    def __post_init__(self) -> None:
+        columns = (self.turn1, self.turn2, self.turn3, self.turn4_plus)
+        total = sum(column for column in columns if column is not None)
+        if total != self.session_tokens:
+            raise ValueError(
+                f"ledger row does not sum: columns total {total}, "
+                f"session_tokens {self.session_tokens}"
+            )
+
+
+def collapse_turns(per_turn_tokens: Sequence[int]) -> PaperLedgerRow:
+    """Collapse a per-turn token sequence to the paper's T1/T2/T3/T4+ columns.
+
+    ``per_turn_tokens[i]`` is the total token spend of turn ``i+1``. Turns 4
+    onward are summed into the ``turn4_plus`` column, exactly the presentation
+    rule of ``tab:tok_agent_context_gpt55``; absent columns are ``None``.
+    """
+    if any(tokens < 0 for tokens in per_turn_tokens):
+        raise ValueError("per-turn token counts must be non-negative")
+    head = [
+        per_turn_tokens[i] if i < len(per_turn_tokens) else None for i in range(3)
+    ]
+    tail = sum(per_turn_tokens[3:]) if len(per_turn_tokens) > 3 else None
+    return PaperLedgerRow(
+        turn1=head[0],
+        turn2=head[1],
+        turn3=head[2],
+        turn4_plus=tail,
+        session_tokens=sum(per_turn_tokens),
+    )
+
+
+def paper_ledger_row(session: Session) -> PaperLedgerRow:
+    """Render a session in the column shape of ``tab:tok_agent_context_gpt55``."""
+    return collapse_turns([record.turn_tokens for record in session.turns])
