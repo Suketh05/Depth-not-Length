@@ -291,3 +291,24 @@ assert_true(realret_kappa[realret_arm == "brief"] > max(realret_kappa[realret_ar
             "realret:brief kappa tops similarity band")
 cat(sprintf("PASS (5) tab:realret identity: round(compliance/recall,3)==kappa for all %d arms (brief kappa=%.3f)\n",
             length(realret_arm), realret_kappa[realret_arm == "brief"]))
+
+## ---------------------------------------------------------------------------
+## (6) Theory gap g(d) at the paper calibration
+##     Cross-checks src/membench/theory/crossover.py::g and recovery.py;
+##     golden pack A.3 / A.1, paper Prop prop:cross ("g(2) ~ 0.79").
+##       P_struct(d) = q^d                              (Thm thm:struct)
+##       P_sim(d)    = s0^d * rho^(d(d+1)/2)            (Thm thm:sim, triangular)
+##       g(d)        = P_struct(d) - P_sim(d)           (structure-minus-similarity)
+##     Calibration s0=0.70, rho=0.67, q=0.97.
+##     g(2) = 0.97^2 - 0.70^2*0.67^3 = 0.9409 - 0.14737387 = 0.79352613.
+## ---------------------------------------------------------------------------
+q0 <- 0.97; s0 <- 0.70; rho <- 0.67
+p_struct <- function(d) q0^d
+p_sim    <- function(d) s0^d * rho^(d * (d + 1) / 2)
+gap      <- function(d) p_struct(d) - p_sim(d)
+assert_close(p_sim(2), 0.14737387000000002, 1e-12, "theory:P_sim(2)")
+assert_close(gap(2),   0.79352613,          1e-8,  "theory:g(2)~0.79352613")
+assert_close(gap(2),   0.7935261299999999,  1e-12, "theory:g(2) full precision")
+assert_close(gap(1),   0.501,               1e-12, "theory:g(1)=0.501")
+cat(sprintf("PASS (6) theory gap: g(1)=%.3f g(2)=%.8f (structure wins, prop:cross)\n",
+            gap(1), gap(2)))
