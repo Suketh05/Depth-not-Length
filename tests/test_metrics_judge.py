@@ -18,6 +18,8 @@ from membench.metrics.judge import (
     LLMComplianceJudge,
     StubComplianceJudge,
     build_judge_prompt,
+    grader_agreement,
+    judge_rule_agreement,
     judge_task,
     parse_judge_verdict,
 )
@@ -422,3 +424,124 @@ class TestLLMComplianceJudge:
             _case(AUDIT, "I wrapped the export in withAuditLog() before streaming.")
         )
         assert verdict.parse_ok is True
+
+
+class TestJudgeRuleAgreementArithmetic:
+    """Hand-computed agreement goldens (never produced by running the module)."""
+
+    def test_golden_four_of_five(self) -> None:
+        # judge = [T, T, F, F, T]  (p_J = 3/5)
+        # rule  = [T, F, F, F, T]  (p_R = 2/5)
+        # agree on units 1, 3, 4, 5 -> p_o = 4/5 = 0.8
+        # p_e = (3/5)(2/5) + (2/5)(3/5) = 6/25 + 6/25 = 12/25 = 0.48
+        # kappa = (4/5 - 12/25) / (1 - 12/25) = (8/25) / (13/25) = 8/13
+        #       = 0.6153846153846154 (exact fraction 8/13)
+        result = judge_rule_agreement(
+            [True, True, False, False, True], [True, False, False, False, True]
+        )
+        assert result.n == 5
+        assert result.n_agree == 4
+        assert result.agreement_rate == 0.8
+        assert result.judge_positive_rate == 0.6
+        assert result.rule_positive_rate == 0.4
+        assert result.cohen_kappa == pytest.approx(8 / 13, abs=1e-12)
+
+    def test_golden_seven_of_ten(self) -> None:
+        # judge = [T,T,T,T,T,T,F,F,F,F]  (p_J = 6/10)
+        # rule  = [T,T,T,T,F,F,F,F,T,F]  (p_R = 5/10)
+        # agreements at units 1,2,3,4,7,8,10 -> p_o = 7/10
+        # p_e = 0.6*0.5 + 0.4*0.5 = 0.5
+        # kappa = (0.7 - 0.5) / (1 - 0.5) = 0.2 / 0.5 = 2/5 = 0.4
+        judge = [True] * 6 + [False] * 4
+        rule = [True, True, True, True, False, False, False, False, True, False]
+        result = judge_rule_agreement(judge, rule)
+        assert result.n_agree == 7
+        assert result.agreement_rate == 0.7
+        assert result.cohen_kappa == pytest.approx(0.4, abs=1e-12)
+
+    def test_chance_floor_gives_zero_kappa(self) -> None:
+        # judge = [T,T,F,F], rule = [T,F,T,F]: p_o = 2/4 = 0.5,
+        # p_e = 0.5*0.5 + 0.5*0.5 = 0.5 -> kappa = 0/0.5 = 0.0 exactly.
+        # Raw agreement 50% but ZERO beyond chance -- the reason kappa is
+        # reported next to the raw rate.
+        result = judge_rule_agreement([True, True, False, False], [True, False, True, False])
+        assert result.agreement_rate == 0.5
+        assert result.cohen_kappa == 0.0
+
+    def test_perfect_agreement_is_kappa_one(self) -> None:
+        flags = [True, False, True, True, False]
+        result = judge_rule_agreement(flags, list(flags))
+        assert result.agreement_rate == 1.0
+        assert result.cohen_kappa == 1.0
+
+    def test_degenerate_all_positive_agreement_is_kappa_one(self) -> None:
+        # Both raters constant-True: p_o = 1 and p_e = 1 (0/0 in the raw
+        # formula); defined as 1.0 at perfect agreement.
+        result = judge_rule_agreement([True, True, True], [True, True, True])
+        assert result.agreement_rate == 1.0
+        assert result.cohen_kappa == 1.0
+
+    def test_constant_but_opposite_raters_score_zero(self) -> None:
+        # judge all-True vs rule all-False: p_o = 0, p_e = 1*0 + 0*1 = 0
+        # -> kappa = (0-0)/(1-0) = 0.0 (no agreement, but none expected either).
+        result = judge_rule_agreement([True, True, True], [False, False, False])
+        assert result.agreement_rate == 0.0
+        assert result.cohen_kappa == 0.0
+
+    def test_systematic_disagreement_is_kappa_minus_one(self) -> None:
+        # judge = [T,F], rule = [F,T]: p_o = 0, p_e = 0.5*0.5 + 0.5*0.5 = 0.5
+        # -> kappa = (0 - 0.5)/(1 - 0.5) = -1.0 (worse than chance).
+        result = judge_rule_agreement([True, False], [False, True])
+        assert result.cohen_kappa == -1.0
+
+    def test_empty_units_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="zero units"):
+            judge_rule_agreement([], [])
+
+    def test_misaligned_vectors_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="align"):
+            judge_rule_agreement([True, False], [True])
+
+
+class TestGraderAgreementEndToEnd:
+    def test_hand_computed_agreement_over_tasks(self) -> None:
+        # Four (task, decision) units, hand-graded:
+        #   unit 1 (t1, D-1): "call withAuditLog() ..." in a clean sentence
+        #             -> judge T, rule T (agree)
+        #   unit 2 (t1, D-2): "skip DateRangePicker" -- negated restatement
+        #             -> judge F, rule T (the gaming divergence; DISAGREE)
+        #   unit 3 (t2, D-3): bare-id "per D-3" -> judge T, rule T (agree)
+        #   unit 4 (t3, D-1): identifier absent -> judge F, rule F (agree)
+        # p_o = 3/4 = 0.75; p_J = 2/4 = 0.5; p_R = 3/4 = 0.75
+        # p_e = 0.5*0.75 + 0.5*0.25 = 0.375 + 0.125 = 0.5
+        # kappa = (0.75 - 0.5)/(1 - 0.5) = 0.25/0.5 = 0.5 exactly
+        graded = [
+            (
+                "I will call withAuditLog() before streaming. We can skip DateRangePicker here.",
+                _task(("D-1", "D-2"), task_id="t1"),
+            ),
+            ("per D-3 we proceed", _task(("D-3",), task_id="t2")),
+            ("Just stream the rows.", _task(("D-1",), task_id="t3")),
+            ("vacuous tasks are skipped entirely", _task((), task_id="t4")),
+        ]
+        result = grader_agreement(StubComplianceJudge(), graded)
+        assert result.n == 4  # t4 contributed no units
+        assert result.n_agree == 3
+        assert result.agreement_rate == 0.75
+        assert result.judge_positive_rate == 0.5
+        assert result.rule_positive_rate == 0.75
+        assert result.cohen_kappa == 0.5
+
+    def test_ungamed_batch_agrees_perfectly(self) -> None:
+        graded = [
+            ("call withAuditLog() and use DateRangePicker", _task(("D-1", "D-2"), task_id="t1")),
+            ("nothing relevant", _task(("D-1",), task_id="t2")),
+        ]
+        result = grader_agreement(StubComplianceJudge(), graded)
+        assert result.n == 3
+        assert result.agreement_rate == 1.0
+        assert result.cohen_kappa == 1.0
+
+    def test_only_vacuous_tasks_is_an_error(self) -> None:
+        with pytest.raises(ValueError, match="zero units"):
+            grader_agreement(StubComplianceJudge(), [("anything", _task(()))])
