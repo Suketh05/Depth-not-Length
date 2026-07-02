@@ -13,7 +13,9 @@ Goldens are hand-built:
 from __future__ import annotations
 
 from membench.metrics.judge import (
+    DEFAULT_JUDGE_MODEL,
     ComplianceVerdict,
+    Judge,
     JudgeConfig,
     StubJudge,
 )
@@ -106,3 +108,66 @@ class TestStubJudgeGoldens:
         assert conf_a == conf_a2  # deterministic under a fixed seed
         assert conf_a != conf_b  # different seed => different confidence
         assert 0.8 <= conf_a <= 1.0  # bimodal near-deterministic band
+
+
+# A second governing decision naming a disjoint identifier surface.
+_DECISION2 = MemoryItem(
+    item_id="D-002",
+    text="Every write path must go through the RateLimiter and call enforceQuota().",
+)
+_CORPUS2 = (MemoryItem(item_id="D-001", text=_DECISION_TEXT), _DECISION2)
+
+
+class TestProtocolConformance:
+    def test_stub_judge_satisfies_judge_protocol(self) -> None:
+        assert isinstance(StubJudge(), Judge)
+
+    def test_arbitrary_object_is_not_a_judge(self) -> None:
+        assert not isinstance(object(), Judge)
+
+    def test_grade_returns_one_verdict_per_governing_decision(self) -> None:
+        verdict = StubJudge().grade(_task(("D-001", "D-002"), corpus=_CORPUS2), _ANSWER_ENFORCED)
+        assert isinstance(verdict, ComplianceVerdict)
+        assert tuple(v.decision_id for v in verdict.verdicts) == ("D-001", "D-002")
+
+
+class TestJudgeConfigDistinctness:
+    def test_default_judge_model_distinct_from_answer_models(self) -> None:
+        # sec:grader: the grader is distinct from the answer models (Claude Sonnet,
+        # GPT-5.1); the default judge is a different Claude tier.
+        assert DEFAULT_JUDGE_MODEL == "claude-opus-4-8"
+        assert JudgeConfig().is_distinct_from(["claude-sonnet-4-6", "gpt-5.1"]) is True
+
+    def test_judge_not_distinct_when_it_equals_an_answer_model(self) -> None:
+        assert (
+            JudgeConfig(model="claude-sonnet-4-6").is_distinct_from(["claude-sonnet-4-6"]) is False
+        )
+
+
+class TestVerdictRollup:
+    def test_partial_compliance_rate_is_a_clean_fraction(self) -> None:
+        # D-001 enforced (honored), D-002 never asserted => 1 of 2 honored.
+        verdict = StubJudge().grade(_task(("D-001", "D-002"), corpus=_CORPUS2), _ANSWER_ENFORCED)
+        assert verdict.total == 2
+        assert verdict.honored_count == 1
+        assert verdict.rate == 0.5
+        assert verdict.compliant is False  # bimodal event needs ALL honored
+
+    def test_saturation_all_decisions_honored(self) -> None:
+        # An answer that enforces both invariants (new identifier for each) is
+        # fully compliant.
+        answer = (
+            "Wrapped exportUsers() in withAuditLog(); "
+            "routed writes via enforceQuota() in guardWrites()."
+        )
+        verdict = StubJudge().grade(_task(("D-001", "D-002"), corpus=_CORPUS2), answer)
+        assert verdict.honored_count == 2
+        assert verdict.rate == 1.0
+        assert verdict.compliant is True
+
+    def test_empty_governing_set_is_vacuously_compliant(self) -> None:
+        verdict = StubJudge().grade(_task(()), _ANSWER_ABSENT)
+        assert verdict.total == 0
+        assert verdict.verdicts == ()
+        assert verdict.rate == 1.0
+        assert verdict.compliant is True
