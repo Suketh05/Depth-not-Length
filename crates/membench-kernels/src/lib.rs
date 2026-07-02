@@ -72,6 +72,7 @@ fn membench_kernels(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify::structured_recovery, m)?)?;
     m.add_function(wrap_pyfunction!(verify::recovery_gap, m)?)?;
     m.add_function(wrap_pyfunction!(verify::crossover_search, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::bm25_plus_scores, m)?)?;
     m.add("__version__", "0.1.0")?;
     Ok(())
 }

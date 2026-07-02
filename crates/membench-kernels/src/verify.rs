@@ -22,6 +22,8 @@
 //!   * Wilson interval — the use-factor kappa CI, `eq:factor` / tab:realret;
 //!     Wilson 1927.
 
+use std::collections::HashMap;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -235,6 +237,84 @@ fn bisect_root(g: &impl Fn(f64) -> f64, tau: f64, mut lo: f64, mut hi: f64) -> f
     0.5 * (lo + hi)
 }
 
+// ---------------------------------------------------------------------------
+// D. Retrieval scoring: BM25+ (bm25_plus.py, Lv & Zhai 2011)
+// ---------------------------------------------------------------------------
+
+/// BM25+ score of every document for a tokenized query.
+///
+/// Verifies `membench.retrieval.bm25_plus.bm25_plus_scores` (paper retrieval
+/// harness §`sec:offline`; Lv & Zhai, CIKM 2011). For each query term that occurs
+/// in a document,
+/// `S += idf * (delta + (k1+1)*tf / (k1*(1 - b + b*|D|/avgdl) + tf))`, with the
+/// non-negative IDF `ln((N+1)/df)`. The lower bound `delta` is added only for
+/// present terms — the property that guarantees a score gap between documents that
+/// contain a term and those that do not. `delta = 0` recovers Okapi BM25 exactly.
+fn bm25_plus_scores_impl(
+    corpus: &[Vec<String>],
+    query: &[String],
+    k1: f64,
+    b: f64,
+    delta: f64,
+) -> Vec<f64> {
+    let n = corpus.len();
+    let mut scores = vec![0.0f64; n];
+    if n == 0 {
+        return scores;
+    }
+    let doc_len: Vec<f64> = corpus.iter().map(|d| d.len() as f64).collect();
+    let avgdl = doc_len.iter().sum::<f64>() / n as f64;
+    if avgdl == 0.0 {
+        // Degenerate corpus: every document is empty, so nothing can match.
+        return scores;
+    }
+    // Per-document term counts.
+    let counters: Vec<HashMap<&str, f64>> = corpus
+        .iter()
+        .map(|doc| {
+            let mut c: HashMap<&str, f64> = HashMap::new();
+            for tok in doc {
+                *c.entry(tok.as_str()).or_insert(0.0) += 1.0;
+            }
+            c
+        })
+        .collect();
+    // Length-normalized denominator term k1*(1 - b + b*|D|/avgdl), per document.
+    let norm: Vec<f64> = doc_len
+        .iter()
+        .map(|&dl| k1 * (1.0 - b + b * dl / avgdl))
+        .collect();
+
+    for term in query {
+        let key = term.as_str();
+        let df = counters.iter().filter(|c| c.contains_key(key)).count();
+        if df == 0 {
+            continue;
+        }
+        let idf = ((n + 1) as f64 / df as f64).ln();
+        for i in 0..n {
+            let tf = counters[i].get(key).copied().unwrap_or(0.0);
+            let ratio = (k1 + 1.0) * tf / (norm[i] + tf);
+            let lower = if tf > 0.0 { delta } else { 0.0 };
+            scores[i] += idf * (lower + ratio);
+        }
+    }
+    scores
+}
+
+/// BM25+ scores aligned with corpus order. See [`bm25_plus_scores_impl`].
+#[pyfunction]
+#[pyo3(signature = (corpus, query, k1=1.5, b=0.75, delta=1.0))]
+pub fn bm25_plus_scores(
+    corpus: Vec<Vec<String>>,
+    query: Vec<String>,
+    k1: f64,
+    b: f64,
+    delta: f64,
+) -> PyResult<Vec<f64>> {
+    Ok(bm25_plus_scores_impl(&corpus, &query, k1, b, delta))
+}
+
 /// Crossover scan; returns `(exists, d_star, d_star_continuous, win_lo, win_hi,
 /// peak_depth, g_curve)` with `-1`/`NaN` sentinels when no crossover exists.
 /// See [`crossover_search_impl`].
@@ -424,5 +504,53 @@ mod tests {
     fn crossover_rejects_bad_domain() {
         assert!(crossover_search_impl(0.7, 0.67, 0.97, -0.1, 64).is_err());
         assert!(crossover_search_impl(0.7, 0.67, 0.97, 0.0, 0).is_err());
+    }
+
+    // ---- BM25+ (golden_pack.md D.1, Lv & Zhai 2011) ----
+
+    fn toks(words: &[&str]) -> Vec<String> {
+        words.iter().map(|s| s.to_string()).collect()
+    }
+
+    // Single-doc corpus [["alpha","beta","beta"]], query ["beta"], k1=1.5, b=0.75.
+    // BM25+ (delta=1) = ln(2)*17/7; BM25 (delta=0) = ln(2)*10/7; gap = idf*delta = ln 2.
+    #[test]
+    fn bm25_plus_single_doc_golden() {
+        let corpus = vec![toks(&["alpha", "beta", "beta"])];
+        let query = toks(&["beta"]);
+        let plus = bm25_plus_scores_impl(&corpus, &query, 1.5, 0.75, 1.0);
+        let bm25 = bm25_plus_scores_impl(&corpus, &query, 1.5, 0.75, 0.0);
+        let ln2 = 2.0f64.ln();
+        assert!(
+            (plus[0] - ln2 * 17.0 / 7.0).abs() <= 1e-12,
+            "got {}",
+            plus[0]
+        );
+        assert!((plus[0] - 1.6833574385027244).abs() <= 1e-9);
+        assert!((bm25[0] - ln2 * 10.0 / 7.0).abs() <= 1e-12);
+        assert!((bm25[0] - 0.9902102579427790).abs() <= 1e-9);
+        assert!((plus[0] - bm25[0] - ln2).abs() <= 1e-12);
+    }
+
+    // Long-doc property: a 2-doc corpus where doc0 is "audit" + 40 fillers and doc1
+    // shares no query term. BM25+ - BM25 on doc0 = idf*delta = ln 3; the
+    // non-containing doc scores exactly 0.0 (presence-gated).
+    #[test]
+    fn bm25_plus_long_doc_gap_is_idf_delta() {
+        let mut doc0 = toks(&["audit"]);
+        doc0.extend(std::iter::repeat_n("x".to_string(), 40));
+        let corpus = vec![doc0, toks(&["button", "component"])];
+        let query = toks(&["audit"]);
+        let plus = bm25_plus_scores_impl(&corpus, &query, 1.5, 0.75, 1.0);
+        let bm25 = bm25_plus_scores_impl(&corpus, &query, 1.5, 0.75, 0.0);
+        assert!((plus[0] - bm25[0] - 3.0f64.ln()).abs() <= 1e-12);
+        assert!((plus[0] - bm25[0] - 1.0986122886681098).abs() <= 1e-9);
+        assert_eq!(plus[1], 0.0);
+        assert_eq!(bm25[1], 0.0);
+    }
+
+    #[test]
+    fn bm25_plus_empty_corpus_is_empty() {
+        assert!(bm25_plus_scores_impl(&[], &toks(&["beta"]), 1.5, 0.75, 1.0).is_empty());
     }
 }
