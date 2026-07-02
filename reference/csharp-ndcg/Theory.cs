@@ -202,5 +202,55 @@ public static class Theory
         return wins;
     }
 
+    // ---- A.4 Fano floor / channel capacity (eq:fano, Thm thm:fano; capacity.py) ----
+
+    /// <summary>
+    /// Binary entropy H_b(p) = -p*log2(p) - (1-p)*log2(1-p), in bits, with H_b(0)=H_b(1)=0.
+    /// H_b(0.5) = 1.0 bit exactly (capacity.py::binary_entropy).
+    /// </summary>
+    public static double BinaryEntropy(double p)
+    {
+        RequireClosedUnit(p, nameof(p));
+        if (p <= 0.0 || p >= 1.0)
+            return 0.0;
+        return -p * Math.Log2(p) - (1.0 - p) * Math.Log2(1.0 - p);
+    }
+
+    /// <summary>
+    /// Binary symmetric channel capacity C(p) = 1 - H_b(p) bits (capacity.py::bsc_capacity).
+    /// C(0.5) = 0.0 (a fully noisy channel carries nothing); C(0) = C(1) = 1.0.
+    /// </summary>
+    public static double BscCapacity(double p) => 1.0 - BinaryEntropy(p);
+
+    /// <summary>
+    /// Context-free error floor for the uniform 1/K survivor case (eq:fano / Thm thm:fano,
+    /// capacity.py::context_free_floor). With zero mutual information the Fano bound is tight:
+    /// bayes_error = floor = 1 - 1/K exactly (prior entropy log2 K, Bayes accuracy 1/K).
+    /// K=2 -> 0.5, K=4 -> 0.75, K=10 -> 0.9. Empirically the `none` arm sits at this floor
+    /// (0.000-0.025 synthetic, 0.073 pooled real code).
+    /// </summary>
+    public static double ContextFreeFloor(int k)
+    {
+        if (k < 2)
+            throw new ArgumentOutOfRangeException(nameof(k), k, "K must be >= 2");
+        return 1.0 - 1.0 / k;
+    }
+
+    /// <summary>Prior entropy log2 K of the uniform K-way label prior (bits).</summary>
+    public static double UniformPriorEntropy(int k)
+    {
+        if (k < 1)
+            throw new ArgumentOutOfRangeException(nameof(k), k, "K must be >= 1");
+        return Math.Log2(k);
+    }
+
+    /// <summary>Bayes accuracy 1/K of a zero-information guess over K uniform labels.</summary>
+    public static double UniformBayesAccuracy(int k)
+    {
+        if (k < 1)
+            throw new ArgumentOutOfRangeException(nameof(k), k, "K must be >= 1");
+        return 1.0 / k;
+    }
+
     // === derivations appended below ===
 }
