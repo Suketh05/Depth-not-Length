@@ -166,3 +166,23 @@ class TestNativeTheoryParity:
         assert crossover_search_native(s0, rho, q, 0.7935261299999999, 64) == 3
         # Above the unimodal peak gap (~0.88) nothing wins on the range.
         assert crossover_search_native(s0, rho, q, 0.95, 64) is None
+
+
+@pytest.mark.skipif(not native_available(), reason="native kernel not built")
+class TestNativeGoldenConstants:
+    """Pin the two golden-pack constants at full float64 precision (asserted
+    verbatim from golden_pack.md sections A.1/A.3, never recomputed)."""
+
+    def test_p_sim_d3_golden(self) -> None:
+        # golden_pack A.1: P_sim(3) = s0^3 * rho^6 at s0=0.70, rho=0.67.
+        assert similarity_recovery_native(0.70, 0.67, 3) == 0.031027225083967002
+
+    def test_gap_d2_golden(self) -> None:
+        # golden_pack A.3: g(2) = q^2 - P_sim(2) at s0=0.70, rho=0.67, q=0.97.
+        assert gap_native(0.70, 0.67, 0.97, 2.0) == 0.7935261299999999
+
+    def test_structured_d2_golden(self) -> None:
+        # golden_pack A.2: P_struct(2) = 0.97^2.
+        assert structured_recovery_native(0.97, 2) == 0.9409
+
+
