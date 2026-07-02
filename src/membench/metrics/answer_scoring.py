@@ -49,10 +49,13 @@ from __future__ import annotations
 
 import re
 import string
+from collections import Counter
 
 __all__ = [
+    "answer_exact_match",
     "answer_tokens",
     "normalize_answer",
+    "token_f1",
 ]
 
 # Articles stripped by the SQuAD normalization (matched as whole words only).
@@ -100,3 +103,68 @@ def answer_tokens(text: str) -> list[str]:
     """
     normalized = normalize_answer(text)
     return normalized.split() if normalized else []
+
+
+def answer_exact_match(prediction: str, gold: str) -> bool:
+    """Return whether ``prediction`` and ``gold`` are equal after normalization.
+
+    The SQuAD/HotpotQA exact-match criterion [Rajpurkar2016]_: two answers match iff
+    their :func:`normalize_answer` forms are identical.
+
+    Parameters
+    ----------
+    prediction
+        Model-produced answer.
+    gold
+        Reference (gold) answer.
+
+    Returns
+    -------
+    bool
+        ``True`` when the normalized strings are equal.
+    """
+    return normalize_answer(prediction) == normalize_answer(gold)
+
+
+def token_f1(prediction: str, gold: str) -> float:
+    r"""Return the token-level F1 between a prediction and a gold answer.
+
+    The standard SQuAD token F1 [Rajpurkar2016]_ over the *multisets* of normalized
+    tokens (:func:`answer_tokens`): with ``num_same`` the size of the multiset
+    intersection,
+
+    .. math::
+
+        \text{precision} = \frac{\text{num\_same}}{|\text{pred tokens}|},\quad
+        \text{recall} = \frac{\text{num\_same}}{|\text{gold tokens}|},\quad
+        F_1 = \frac{2\,P\,R}{P + R}.
+
+    This is the per-answer quantity averaged into the LoCoMo token-overlap fallback
+    judge (:class:`TokenOverlapJudge`).
+
+    Parameters
+    ----------
+    prediction
+        Model-produced answer.
+    gold
+        Reference (gold) answer.
+
+    Returns
+    -------
+    float
+        Token F1 in ``[0, 1]``. Boundary conventions (SQuAD): if either side has no
+        tokens, returns ``1.0`` iff *both* are empty else ``0.0``; ``0.0`` when the
+        two token multisets are disjoint.
+    """
+    pred_tokens = answer_tokens(prediction)
+    gold_tokens = answer_tokens(gold)
+    if not pred_tokens or not gold_tokens:
+        # Both empty -> vacuously perfect; exactly one empty -> no overlap possible.
+        return float(pred_tokens == gold_tokens)
+    common = Counter(pred_tokens) & Counter(gold_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0.0
+    precision = num_same / len(pred_tokens)
+    recall = num_same / len(gold_tokens)
+    return 2 * precision * recall / (precision + recall)
