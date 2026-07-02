@@ -316,3 +316,62 @@ class TestLLMJudgeAccuracy:
     def test_empty_run_raises(self) -> None:
         with pytest.raises(ValueError, match="at least one"):
             llm_judge_accuracy([])
+
+
+class TestEndToEndScenario:
+    """A tiny deterministic DMR/LoCoMo-style run scored end to end.
+
+    Mirrors how the pubbench pipeline consumes this module: gold answers come
+    from a loader's gold_answers() mapping, model answers are free text,
+    facts are extracted with split_facts, and the two tab:stdbench statistics
+    (fact F1, judge accuracy) are aggregated. Aggregates are hand-computed.
+    """
+
+    # (prediction, gold) per question -- fixed, no randomness needed.
+    _RUN = (
+        # Perfect: both facts recovered verbatim (up to normalization).
+        (
+            "She moved to Lyon in 2019. She works at Acme.",
+            "she moved to Lyon in 2019; she works at Acme",
+        ),
+        # Half right: one of two gold facts, one hallucination.
+        ("He plays chess. He owns a dog.", "he plays chess; he has two cats"),
+        # No answer against real golds.
+        ("", "the concert was in June"),
+    )
+
+    def test_fact_f1_aggregate(self) -> None:
+        # Per-question F1, hand-computed:
+        # q1: pred {2 facts} == gold {2 facts} -> 1.0
+        # q2: pred 2, gold 2, matched 1 -> F1 = 2*1/(2+2) = 1/2
+        # q3: pred 0, gold 1 -> 0.0
+        # mean = (1 + 1/2 + 0)/3 = 1/2.
+        results = [fact_f1(split_facts(pred), split_facts(gold)) for pred, gold in self._RUN]
+        assert [r.f1 for r in results] == [1.0, 1 / 2, 0.0]
+        assert mean_fact_f1(results) == pytest.approx(1 / 2)
+
+    def test_judge_accuracy_aggregate(self) -> None:
+        # Fallback-judge verdicts, hand-computed on whole answers:
+        # q1: pred tokens 10 = gold tokens 10, all shared -> F1 = 1 -> T
+        #     (normalization removes '.' and ';' but no articles here)
+        # q2: pred [he plays chess he owns dog] (6 tokens; article "a" drops)
+        #     vs gold [he plays chess he has two cats] (7 tokens); shared bag
+        #     {he x2, plays, chess} -> overlap 4 -> F1 = 2*4/(6+7) = 8/13
+        #     = 0.615... >= 0.5 -> T
+        # q3: empty vs non-empty -> F1 = 0 -> F
+        records = [
+            QARecord(task_id=f"q{i}", question="?", prediction=pred, gold=gold)
+            for i, (pred, gold) in enumerate(self._RUN)
+        ]
+        result = llm_judge_accuracy(records)
+        assert result.verdicts == (True, True, False)
+        assert result.accuracy == 2 / 3  # exact fraction
+
+    def test_saturation_and_floor(self) -> None:
+        # Saturation: identical answers -> accuracy 1 and mean F1 1.
+        sat = [QARecord("s", "?", "same answer", "same answer")]
+        assert llm_judge_accuracy(sat).accuracy == 1.0
+        # Floor: disjoint answers -> accuracy 0 and mean F1 0.
+        floor = [QARecord("f", "?", "alpha", "omega")]
+        assert llm_judge_accuracy(floor).accuracy == 0.0
+        assert mean_fact_f1([fact_f1(["alpha"], ["omega"])]) == 0.0
