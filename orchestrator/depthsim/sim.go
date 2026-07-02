@@ -107,3 +107,24 @@ func (m Model) LogAnalyticPRet(a Arm, d int) float64 {
 	t := float64(d*(d+1)) / 2
 	return float64(d)*math.Log(m.S0) + t*math.Log(m.Rho)
 }
+
+// Gap returns the structured advantage g(d) = P_ret^struct(d) - P_ret^sim(d)
+// (eq:gd). It is unimodal in d and, for q < 1, positive on a contiguous depth
+// interval. Under PaperCalibration g(1) = 0.501, g(2) ~= 0.7935 (golden A.1).
+func (m Model) Gap(d int) float64 {
+	return m.AnalyticPRet(Structured, d) - m.AnalyticPRet(Similarity, d)
+}
+
+// AnalyticCrossover returns the smallest depth in 1..maxDepth with g(d) > 0,
+// i.e. the closed-form crossover where structure first overtakes similarity
+// (Prop prop:cross). Under PaperCalibration this is d* = 1 because structure
+// already wins at depth 1 (g(1) = 0.501 > 0; golden A.3). Returns 0 if structure
+// never leads within maxDepth.
+func (m Model) AnalyticCrossover(maxDepth int) int {
+	for d := 1; d <= maxDepth; d++ {
+		if m.Gap(d) > 0 {
+			return d
+		}
+	}
+	return 0
+}
