@@ -70,3 +70,36 @@ assert_true <- function(cond, label) {
 }
 
 cat("\n== statistics cross-checks (base R) ==\n")
+
+## ---------------------------------------------------------------------------
+## (1) DerSimonian-Laird random-effects meta-analysis
+##     Cross-checks src/membench/stats/meta_analysis.py; golden pack C.2.
+##     Standard DL moment estimator (DerSimonian & Laird 1986):
+##       w_i      = 1 / v_i                       (fixed-effect / inverse-var)
+##       theta_F  = sum(w_i y_i) / sum(w_i)
+##       Q        = sum w_i (y_i - theta_F)^2     (Cochran's Q)
+##       C        = sum(w_i) - sum(w_i^2)/sum(w_i)
+##       tau^2    = max(0, (Q - (k-1)) / C)       (between-study variance)
+##       I^2      = max(0, (Q - (k-1)) / Q)       (Higgins-Thompson)
+##       w*_i     = 1 / (v_i + tau^2)             (random-effects weights)
+##       theta_R  = sum(w*_i y_i) / sum(w*_i)
+##       SE       = sqrt(1 / sum(w*_i))
+## ---------------------------------------------------------------------------
+dersimonian_laird <- function(y, v) {
+  k <- length(y)
+  stopifnot(k >= 2L, length(v) == k, all(v > 0))
+  w <- 1 / v
+  sw <- sum(w)
+  theta_fixed <- sum(w * y) / sw
+  Q <- sum(w * (y - theta_fixed)^2)
+  df <- k - 1
+  C <- sw - sum(w^2) / sw
+  tau2 <- max(0, (Q - df) / C)
+  I2 <- max(0, (Q - df) / Q)
+  w_star <- 1 / (v + tau2)
+  sw_star <- sum(w_star)
+  pooled <- sum(w_star * y) / sw_star
+  list(theta_fixed = theta_fixed, Q = Q, tau2 = tau2, I2 = I2,
+       sum_wstar_y = sum(w_star * y), sum_wstar = sw_star,
+       pooled = pooled, se = sqrt(1 / sw_star))
+}
