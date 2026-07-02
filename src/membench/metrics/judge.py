@@ -1,4 +1,4 @@
-"""LLM-judge compliance grading protocol (paper Section ``sec:grader`` / ``sec:gradervalidity``).
+r"""LLM-judge compliance grading protocol (paper Section ``sec:grader`` / ``sec:gradervalidity``).
 
 The paper grades *compliance* -- "the outcome-level judgment that the produced edit
 honors the governing decision" -- with "an LLM-or-rubric-assisted judge that is
@@ -34,7 +34,7 @@ This module implements that protocol:
   kappa between the judge and the mechanical rule-based scorer on the same
   (task, decision) units, quantifying how far the judged construct drifts from
   the identifier-overlap proxy. Divergences feed the use factor
-  :math:`\\kappa = P_{comply} / P_{ret}` of Equation ``eq:factor`` only through
+  :math:`\kappa = P_{comply} / P_{ret}` of Equation ``eq:factor`` only through
   compliance, so this agreement check is the guard on that numerator.
 
 The paper does not publish a numeric judge-vs-rule agreement value, so no paper
@@ -57,13 +57,13 @@ if TYPE_CHECKING:  # imported lazily at runtime: the offline pipeline never need
 
 __all__ = [
     "PROMPT_ORDERS",
+    "RUBRIC_SYSTEM_PROMPT",
     "ComplianceJudge",
     "GraderAgreement",
-    "LLMComplianceJudge",
     "JudgeCase",
     "JudgeConfig",
     "JudgeVerdict",
-    "RUBRIC_SYSTEM_PROMPT",
+    "LLMComplianceJudge",
     "StubComplianceJudge",
     "TaskJudgeResult",
     "build_judge_prompt",
@@ -685,7 +685,7 @@ def judge_rule_agreement(
     if n == 0:
         raise ValueError("agreement is undefined on zero units")
 
-    n_agree = sum(1 for j, r in zip(judge_flags, rule_flags) if bool(j) == bool(r))
+    n_agree = sum(1 for j, r in zip(judge_flags, rule_flags, strict=True) if bool(j) == bool(r))
     p_o = n_agree / n
     p_judge = sum(map(bool, judge_flags)) / n
     p_rule = sum(map(bool, rule_flags)) / n
@@ -701,9 +701,7 @@ def judge_rule_agreement(
     )
 
 
-def grader_agreement(
-    judge: ComplianceJudge, graded: Sequence[tuple[str, Task]]
-) -> GraderAgreement:
+def grader_agreement(judge: ComplianceJudge, graded: Sequence[tuple[str, Task]]) -> GraderAgreement:
     """Run judge and rule-based scorer over (response, task) pairs and compare.
 
     The comparison unit is one (task, governing decision) pair: the judge grades
