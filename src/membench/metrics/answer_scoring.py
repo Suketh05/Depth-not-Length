@@ -44,12 +44,16 @@ from __future__ import annotations
 import re
 import string
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 __all__ = [
     "F1Result",
     "exact_match",
+    "fact_f1",
+    "mean_fact_f1",
     "normalize_answer",
+    "split_facts",
     "token_f1",
     "tokenize_answer",
 ]
@@ -208,3 +212,112 @@ def token_f1(prediction: str, gold: str) -> F1Result:
     overlap_counts = Counter(pred_tokens) & Counter(gold_tokens)
     overlap = sum(overlap_counts.values())
     return _f1_from_counts(overlap, len(pred_tokens), len(gold_tokens))
+
+
+_FACT_DELIMITERS = re.compile(r"[\n;]+|(?<=[.!?])\s+")
+
+
+def split_facts(answer_text: str) -> tuple[str, ...]:
+    """Split a free-text answer into candidate fact strings, deterministically.
+
+    Facts are separated on newlines, semicolons, and sentence-final
+    punctuation followed by whitespace -- the delimiters DMR-style answers
+    actually use to list facts. Empty fragments are dropped; fragments are
+    *not* normalized here (that happens inside :func:`fact_f1`), so the raw
+    fact text stays available for error inspection.
+
+    Parameters
+    ----------
+    answer_text
+        A model or gold answer that lists one or more facts.
+
+    Returns
+    -------
+    tuple of str
+        The non-empty fact fragments, in order of appearance.
+    """
+    fragments = (fragment.strip() for fragment in _FACT_DELIMITERS.split(answer_text))
+    return tuple(fragment for fragment in fragments if fragment)
+
+
+def _normalized_fact_set(facts: Iterable[str]) -> set[str]:
+    """Normalize each fact and deduplicate; empty-normalizing facts are dropped."""
+    normalized = (normalize_answer(fact) for fact in facts)
+    return {fact for fact in normalized if fact}
+
+
+def fact_f1(predicted_facts: Iterable[str], gold_facts: Iterable[str]) -> F1Result:
+    """DMR fact F1: precision/recall/F1 over normalized extracted facts.
+
+    This is the "DMR fact F1" metric of the paper's ``tab:stdbench`` row
+    (Brief 94.2% vs. Kluris 87.0%, cited for provenance -- not asserted
+    here). Each fact string is normalized with :func:`normalize_answer` and
+    the two sides are compared as *sets* (duplicate statements of the same
+    fact neither help nor hurt):
+
+    * precision = matched / predicted -- fraction of asserted facts that are
+      in the gold fact set (penalizes hallucinated facts);
+    * recall = matched / gold -- fraction of gold facts the answer recovered
+      (penalizes forgotten facts);
+    * F1 = harmonic mean, computed as ``2*matched / (n_predicted + n_gold)``.
+
+    A fact "matches" iff its normalized form is identical to a gold fact's
+    normalized form -- the deterministic criterion; graded/semantic matching
+    belongs to the LLM-judge path (:func:`llm_judge_accuracy`), never here.
+
+    Degenerate rule (mirrors :func:`token_f1`): if either side is empty after
+    normalization, the score is 1.0 when both are empty and 0.0 otherwise.
+
+    Parameters
+    ----------
+    predicted_facts
+        Facts extracted from the model answer (e.g. via :func:`split_facts`).
+    gold_facts
+        The benchmark's gold facts for the question.
+
+    Returns
+    -------
+    F1Result
+        Set precision/recall/F1 with the integer counts behind them.
+    """
+    predicted = _normalized_fact_set(predicted_facts)
+    gold = _normalized_fact_set(gold_facts)
+    if not predicted or not gold:
+        score = 1.0 if predicted == gold else 0.0
+        return F1Result(
+            precision=score,
+            recall=score,
+            f1=score,
+            overlap=0,
+            n_predicted=len(predicted),
+            n_gold=len(gold),
+        )
+    return _f1_from_counts(len(predicted & gold), len(predicted), len(gold))
+
+
+def mean_fact_f1(results: Sequence[F1Result]) -> float:
+    """Macro-average the per-question fact F1 into one benchmark score.
+
+    ``tab:stdbench`` reports a single "fact F1 (%)" per system; it is the
+    unweighted mean of per-question F1 (every question counts equally,
+    regardless of how many facts it carries), scaled by the caller to percent.
+
+    Parameters
+    ----------
+    results
+        Per-question :class:`F1Result` values from :func:`fact_f1`.
+
+    Returns
+    -------
+    float
+        Mean F1 in ``[0, 1]``.
+
+    Raises
+    ------
+    ValueError
+        If ``results`` is empty -- an empty benchmark has no score, and
+        silently returning 0 would fabricate one.
+    """
+    if not results:
+        raise ValueError("mean_fact_f1 needs at least one per-question result")
+    return sum(result.f1 for result in results) / len(results)
