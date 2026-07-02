@@ -144,3 +144,24 @@ class TestMcNemarExactGolden:
         res = mcnemar_exact(8, 2)
         assert res.p_value == 0.109375
         assert res.statistic == 6.0
+
+
+class TestMcNemarMidP:
+    def test_b2_c8_mid_p_is_67_over_1024(self) -> None:
+        # The Lancaster mid-p excludes half the point mass at the observed count k = 2
+        # from each tail. Hand-derived from the same n = 10 tail:
+        #   p_mid = (2 * (C(10,0)+C(10,1)+C(10,2)) - C(10,2)) / 2^10
+        #         = (2 * 56 - 45) / 1024
+        #         = 67 / 1024
+        #         = 0.0654296875  (exact dyadic rational).
+        res = mcnemar_exact(2, 8)
+        assert res.mid_p_value == 0.0654296875
+        assert res.mid_p_value == 67 / 1024
+
+    def test_mid_p_is_strictly_less_than_exact_p(self) -> None:
+        # Mid-p is uniformly less conservative than the exact two-sided p-value whenever
+        # there is a non-empty discordant tail.
+        res = mcnemar_exact(2, 8)
+        assert res.mid_p_value < res.p_value
+        # The gap is exactly the excluded point mass C(n, min(b,c)) / 2^n = 45/1024.
+        assert res.p_value - res.mid_p_value == pytest.approx(45 / 1024, abs=1e-15)
