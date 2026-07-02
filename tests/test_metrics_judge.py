@@ -361,3 +361,46 @@ class TestParseVerdict:
         assert verdict.honored is False
         assert verdict.confidence == 0.0
         assert "unparseable" in verdict.rationale
+
+
+# A supersession chain: D-new supersedes D-old (the paper's governance edge). Only
+# the CURRENT decision governs, so honouring the superseded one is NOT compliance.
+_SUPER_CORPUS = (
+    MemoryItem(
+        item_id="D-old",
+        text="Route all reads through OldGateway using fetchDirect().",
+    ),
+    MemoryItem(
+        item_id="D-new",
+        text="Route all reads through NewGateway using fetchViaGateway().",
+        metadata={"node_type": "constraint", "supersedes": "D-old"},
+    ),
+)
+
+
+class TestSupersessionConflict:
+    def test_honouring_the_superseded_decision_is_not_compliant(self) -> None:
+        # The answer honours the stale D-old (OldGateway/fetchDirect) but the task
+        # is governed by the current D-new -- whose invariant is never asserted.
+        task = _task(("D-new",), corpus=_SUPER_CORPUS, task_id="super-1")
+        answer = "Kept the read path on OldGateway via fetchDirect()."
+        verdict = StubJudge().grade(task, answer)
+        assert verdict.compliant is False
+        assert "not asserted" in verdict.verdicts[0].rationale
+
+    def test_honouring_the_current_decision_is_compliant(self) -> None:
+        task = _task(("D-new",), corpus=_SUPER_CORPUS, task_id="super-2")
+        answer = "Migrated reads to NewGateway using fetchViaGateway() in migrateReads()."
+        verdict = StubJudge().grade(task, answer)
+        assert verdict.compliant is True
+
+
+class TestArmInvariance:
+    def test_grade_is_a_function_of_content_only(self) -> None:
+        # sec:gradervalidity's arm-blind construct: the verdict depends only on
+        # (task, answer). The signature admits no arm, so the same answer grades
+        # identically every time -- deterministic and label-free.
+        task = _task(("D-001",))
+        first = StubJudge(JudgeConfig(seed=3)).grade(task, _ANSWER_ENFORCED)
+        second = StubJudge(JudgeConfig(seed=3)).grade(task, _ANSWER_ENFORCED)
+        assert first == second
