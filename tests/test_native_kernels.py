@@ -167,6 +167,16 @@ class TestNativeTheoryParity:
         # Above the unimodal peak gap (~0.88) nothing wins on the range.
         assert crossover_search_native(s0, rho, q, 0.95, 64) is None
 
+    def test_similarity_recovery_underflows_like_reference(self) -> None:
+        """golden_pack A.1: a deep enough chain underflows float64 to exactly 0.0,
+        and the native kernel underflows identically (the finite log-space path is
+        the Python layer's job, not this kernel's)."""
+        model = SimilarityDecayModel(s0=0.5, rho=0.3)
+        ref = similarity_recovery(60, model)
+        nat = similarity_recovery_native(0.5, 0.3, 60)
+        assert ref == 0.0
+        assert nat == 0.0
+
 
 @pytest.mark.skipif(not native_available(), reason="native kernel not built")
 class TestNativeGoldenConstants:
