@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
+from membench.metrics.factorization import wilson_interval
 from membench.stats.exact import (
     ClopperPearsonInterval,
     McNemarExactResult,
@@ -268,3 +269,46 @@ class TestSupersessionScenario:
         arm_b = rng.random(n) < 0.5
         res = mcnemar_exact(*_discordant(arm_a, arm_b))
         assert res.p_value > 0.05
+
+
+class TestClopperPearsonProperties:
+    def test_interval_brackets_point_and_stays_in_unit_range(self) -> None:
+        # Across the whole success sweep the exact interval contains the observed
+        # proportion and never leaves [0, 1].
+        n = 25
+        for x in range(n + 1):
+            ci = clopper_pearson(x, n)
+            assert 0.0 <= ci.low <= ci.point <= ci.high <= 1.0
+
+    def test_width_shrinks_as_n_grows(self) -> None:
+        # At a fixed proportion (p_hat = 1/2) more data yields a tighter exact interval.
+        widths = [
+            (clopper_pearson(k, 2 * k).high - clopper_pearson(k, 2 * k).low)
+            for k in (5, 10, 20, 40)
+        ]
+        assert widths == sorted(widths, reverse=True)
+
+    def test_conservative_relative_to_wilson(self) -> None:
+        # Clopper-Pearson is the guaranteed-coverage interval, so it contains the Wilson
+        # score interval (this module's large-sample sibling) at every cell -- including
+        # the p_hat=1 boundary where Wilson under-covers.
+        for x, n in [(8, 10), (40, 40), (3, 10), (0, 20)]:
+            ci = clopper_pearson(x, n)
+            w_low, w_high = wilson_interval(x, n)
+            assert ci.low <= w_low + 1e-12
+            assert ci.high >= w_high - 1e-12
+
+
+class TestMcNemarProperties:
+    def test_p_value_decreases_as_imbalance_grows(self) -> None:
+        # Fix the discordant total n = 10 and slide the split from balanced (5,5) to
+        # extreme (0,10): the two-sided exact p-value is non-increasing in the imbalance.
+        splits = [(5, 5), (4, 6), (3, 7), (2, 8), (1, 9), (0, 10)]
+        pvals = [mcnemar_exact(b, c).p_value for b, c in splits]
+        assert pvals == sorted(pvals, reverse=True)
+        assert pvals[0] == 1.0  # balanced split cannot reject
+
+    def test_mid_p_bounded_by_exact_p_and_non_negative(self) -> None:
+        for b, c in [(2, 8), (0, 10), (5, 5), (13, 0), (1, 4)]:
+            res = mcnemar_exact(b, c)
+            assert 0.0 <= res.mid_p_value <= res.p_value <= 1.0
