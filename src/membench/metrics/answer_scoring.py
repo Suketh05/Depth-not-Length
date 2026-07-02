@@ -50,10 +50,14 @@ from __future__ import annotations
 import re
 import string
 from collections import Counter
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 __all__ = [
+    "FactF1",
     "answer_exact_match",
     "answer_tokens",
+    "fact_f1",
     "normalize_answer",
     "token_f1",
 ]
@@ -168,3 +172,69 @@ def token_f1(prediction: str, gold: str) -> float:
     precision = num_same / len(pred_tokens)
     recall = num_same / len(gold_tokens)
     return 2 * precision * recall / (precision + recall)
+
+
+@dataclass(frozen=True, slots=True)
+class FactF1:
+    """Precision / recall / F1 over a set of gold facts (DMR fact-F1 protocol)."""
+
+    precision: float
+    recall: float
+    f1: float
+    true_positives: int
+    n_predicted: int
+    n_gold: int
+
+
+def fact_f1(predicted_facts: Iterable[str], gold_facts: Iterable[str]) -> FactF1:
+    r"""Return the DMR deep-memory *fact F1* of a predicted fact set against gold.
+
+    Implements the ``DMR / fact F1`` row of Table~\ref{tab:stdbench}
+    (Section~\ref{sec:pubbench}; ``Brief 94.2``). Each fact is reduced to its
+    :func:`normalize_answer` form and de-duplicated into a set, so that
+    ``true_positives`` counts *distinct* gold facts recovered:
+
+    .. math::
+
+        P = \frac{|\hat F \cap F|}{|\hat F|},\quad
+        R = \frac{|\hat F \cap F|}{|F|},\quad
+        F_1 = \frac{2\,P\,R}{P + R},
+
+    with :math:`\hat F` the predicted and :math:`F` the gold fact set.
+
+    Parameters
+    ----------
+    predicted_facts
+        Facts extracted from the model answer.
+    gold_facts
+        Reference facts the answer should recover.
+
+    Returns
+    -------
+    FactF1
+        Precision, recall, F1, and the underlying counts. Boundary conventions: an
+        empty prediction *and* empty gold is vacuously perfect (all three ``1.0``);
+        if exactly one side is empty every rate is ``0.0``; disjoint sets give
+        ``0.0``.
+    """
+    predicted = {normalize_answer(fact) for fact in predicted_facts}
+    gold = {normalize_answer(fact) for fact in gold_facts}
+    predicted.discard("")
+    gold.discard("")
+
+    if not predicted and not gold:
+        return FactF1(precision=1.0, recall=1.0, f1=1.0, true_positives=0, n_predicted=0, n_gold=0)
+
+    true_positives = len(predicted & gold)
+    precision = true_positives / len(predicted) if predicted else 0.0
+    recall = true_positives / len(gold) if gold else 0.0
+    denom = precision + recall
+    f1 = 2 * precision * recall / denom if denom > 0 else 0.0
+    return FactF1(
+        precision=precision,
+        recall=recall,
+        f1=f1,
+        true_positives=true_positives,
+        n_predicted=len(predicted),
+        n_gold=len(gold),
+    )
