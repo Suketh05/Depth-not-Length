@@ -220,3 +220,110 @@ function checkScorecard(): CheckResult[] {
     },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Identity B.4a — synthetic compliance ordering (tab:synthall): the typed store
+// (brief) tops the arms and the context-free arm (none) is the floor, and the
+// CSV is listed in non-increasing compliance order.
+// ---------------------------------------------------------------------------
+
+function checkSyntheticOrdering(): CheckResult[] {
+  const rows = loadSyntheticCompliance();
+  if (rows.length === 0) {
+    throw new Error("paper_synthetic_compliance.csv has no rows");
+  }
+  let topArm = rows[0]!.arm;
+  let topVal = rows[0]!.compliance;
+  let botArm = rows[0]!.arm;
+  let botVal = rows[0]!.compliance;
+  let descending = true;
+  for (let i = 0; i < rows.length; i += 1) {
+    const cur = rows[i]!;
+    if (cur.compliance > topVal) {
+      topVal = cur.compliance;
+      topArm = cur.arm;
+    }
+    if (cur.compliance < botVal) {
+      botVal = cur.compliance;
+      botArm = cur.arm;
+    }
+    if (i > 0 && cur.compliance > rows[i - 1]!.compliance + IDENTITY_TOL) {
+      descending = false;
+    }
+  }
+  return [
+    {
+      identity: "argmax compliance = brief (typed store leads)",
+      sourceFile: "paper_synthetic_compliance.csv",
+      paperLabel: "tab:synthall",
+      expected: "brief",
+      actual: `${topArm} (${fmt(topVal)})`,
+      ok: topArm === "brief",
+    },
+    {
+      identity: "argmin compliance = none (context-free floor)",
+      sourceFile: "paper_synthetic_compliance.csv",
+      paperLabel: "tab:synthall",
+      expected: "none",
+      actual: `${botArm} (${fmt(botVal)})`,
+      ok: botArm === "none",
+    },
+    {
+      identity: "rows listed in non-increasing compliance order",
+      sourceFile: "paper_synthetic_compliance.csv",
+      paperLabel: "tab:synthall",
+      expected: "true",
+      actual: String(descending),
+      ok: descending,
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Identity B.4b — depth-slope arithmetic (tab:slope). The per-depth compliance
+// grid PAPER_TAB_SLOPE (verbatim from the paper) must reproduce the derived
+// columns committed to paper_depth_slope.csv:
+//   per-arm slope = comply(d3) - comply(d1)
+//   gap(dk)       = comply(brief, dk) - max over similarity arms of comply(., dk)
+// ---------------------------------------------------------------------------
+
+function checkDepthSlope(): CheckResult[] {
+  const csv = loadDepthSlope();
+  const results: CheckResult[] = [];
+  const brief = PAPER_TAB_SLOPE.find((r) => r.arm === "brief");
+  if (brief === undefined) {
+    throw new Error("PAPER_TAB_SLOPE is missing the brief row");
+  }
+  for (const arm of PAPER_TAB_SLOPE) {
+    const slope = arm.d3 - arm.d1;
+    const published = depthSlopeValue(csv, arm.arm);
+    results.push({
+      identity: `${arm.arm}: slope = comply(d3) - comply(d1) = ${arm.d3} - ${arm.d1}`,
+      sourceFile: "paper_depth_slope.csv",
+      paperLabel: "tab:slope",
+      expected: fmt(published),
+      actual: fmt(slope),
+      ok: approxEqual(slope, published, IDENTITY_TOL),
+    });
+  }
+  const depths: readonly [number, (r: (typeof PAPER_TAB_SLOPE)[number]) => number][] = [
+    [1, (r) => r.d1],
+    [2, (r) => r.d2],
+    [3, (r) => r.d3],
+  ];
+  const sims = PAPER_TAB_SLOPE.filter((r) => r.isSimilarity);
+  for (const [d, pick] of depths) {
+    const bestSim = Math.max(...sims.map(pick));
+    const gap = pick(brief) - bestSim;
+    const published = depthSlopeValue(csv, `brief_minus_best_similarity@d${d}`);
+    results.push({
+      identity: `d${d}: brief - best_similarity = ${fmt(pick(brief))} - ${fmt(bestSim)}`,
+      sourceFile: "paper_depth_slope.csv",
+      paperLabel: "tab:slope",
+      expected: fmt(published),
+      actual: fmt(gap),
+      ok: approxEqual(gap, published, IDENTITY_TOL),
+    });
+  }
+  return results;
+}
