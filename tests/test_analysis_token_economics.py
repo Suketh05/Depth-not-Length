@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import random
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -29,10 +30,12 @@ from membench.analysis.token_economics import (
     SessionRecord,
     TournamentSummary,
     decide_matchup,
+    efficiency_score,
     pair_matchups,
     run_tournament,
     session_tokens_from_turns,
     sweep_matchup_count,
+    tokens_per_resolved_point,
     win_count_from_published_pct,
 )
 
@@ -420,3 +423,75 @@ class TestPaperCsvIdentities:
         # at 0 decimals both 287 and 288 of 360 round to 80%.
         with pytest.raises(ValueError, match="ambiguous"):
             win_count_from_published_pct(80.0, matchups=360, decimals=0)
+
+
+class TestEfficiencyScore:
+    """Golden rows quoted verbatim from tab:tok_agent_economics."""
+
+    # (system, resolution %, session tokens, published tok/res pt, published efficiency)
+    PAPER_ROWS: ClassVar[list[tuple[str, float, int, float, float]]] = [
+        ("Brief", 48.0, 12400, 258.3, 387.1),
+        ("Mem0", 24.2, 45235, 1869.2, 53.5),
+        ("Zep", 32.6, 45942, 1409.3, 70.96),
+        ("Supermemory", 30.3, 46342, 1529.4, 65.38),
+        ("MemGPT", 30.3, 45541, 1503.0, 66.53),
+        ("GraphRAG", 28.1, 48382, 1721.8, 58.08),
+        ("A-Mem", 32.6, 45250, 1388.0, 72.04),
+        ("RAPTOR", 26.6, 48167, 1810.8, 55.22),
+        ("ContextQ", 34.0, 45049, 1325.0, 75.47),
+        ("Unabyss", 29.0, 47768, 1647.2, 60.71),
+        ("ctx|", 31.1, 46290, 1488.4, 67.19),
+        ("Driver", 31.7, 46512, 1467.3, 68.15),
+        ("Oiya", 27.3, 50298, 1842.4, 54.28),
+        ("Kluris", 23.6, 51289, 2173.3, 46.01),
+        ("Oracle Summary", 34.3, 44767, 1305.2, 76.62),
+        ("OpenViking", 29.2, 47972, 1642.9, 60.87),
+    ]
+
+    @pytest.mark.parametrize(("system", "res", "tok", "tpp", "eff"), PAPER_ROWS)
+    def test_all_16_published_efficiency_rows(
+        self, system: str, res: float, tok: int, tpp: float, eff: float
+    ) -> None:
+        # The published column prints to at most 2 decimals (trailing zeros
+        # dropped), so round-to-2dp of 1e5 * res / tok must reproduce it, e.g.
+        # Brief: 1e5 * 48.0 / 12400 = 387.096... -> 387.1.
+        assert round(efficiency_score(res, tok), 2) == pytest.approx(eff, abs=1e-12)
+
+    @pytest.mark.parametrize(("system", "res", "tok", "tpp", "eff"), PAPER_ROWS)
+    def test_all_16_published_tokens_per_resolved_point_rows(
+        self, system: str, res: float, tok: int, tpp: float, eff: float
+    ) -> None:
+        # "Tok./res. pt" column: session_tokens / resolution_pct at 1 decimal,
+        # e.g. Brief: 12400 / 48.0 = 258.333... -> 258.3.
+        computed = tokens_per_resolved_point(tok, res)
+        assert computed is not None
+        assert round(computed, 1) == pytest.approx(tpp, abs=1e-12)
+
+    def test_brief_full_precision_anchors(self) -> None:
+        # Hand arithmetic: 1e5 * 48.0 / 12400 = 4800000 / 12400 = 387.0967741...
+        # (= 12000/31 exactly); 12400 / 48.0 = 258.3333... (= 775/3 exactly).
+        assert efficiency_score(48.0, 12400) == pytest.approx(12000 / 31, abs=1e-12)
+        assert tokens_per_resolved_point(12400, 48.0) == pytest.approx(775 / 3, abs=1e-12)
+
+    def test_efficiency_is_scale_over_tokens_per_resolved_point(self) -> None:
+        # The two published columns are reciprocals up to the 1e5 scale.
+        for _system, res, tok, _tpp, _eff in self.PAPER_ROWS:
+            tpp_exact = tokens_per_resolved_point(tok, res)
+            assert tpp_exact is not None
+            assert efficiency_score(res, tok) == pytest.approx(1e5 / tpp_exact, rel=1e-12)
+
+    def test_zero_resolution_is_undefined_not_infinite(self) -> None:
+        assert tokens_per_resolved_point(50000, 0.0) is None
+        assert efficiency_score(0.0, 50000) == 0.0
+
+    def test_domain_guards(self) -> None:
+        with pytest.raises(ValueError, match=r"\[0, 100\]"):
+            efficiency_score(101.0, 1000)
+        with pytest.raises(ValueError, match="positive"):
+            efficiency_score(50.0, 0)
+        with pytest.raises(ValueError, match="positive"):
+            efficiency_score(50.0, 1000, scale=0.0)
+        with pytest.raises(ValueError, match="positive"):
+            tokens_per_resolved_point(0, 50.0)
+        with pytest.raises(ValueError, match=r"\[0, 100\]"):
+            tokens_per_resolved_point(1000, -0.1)
