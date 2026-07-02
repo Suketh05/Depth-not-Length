@@ -14,6 +14,7 @@ The per-competitor win counts sum to exactly 2880, and each equals
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from membench.analysis.token_economics import (
     SessionRecord,
     WinRate,
     build_matchups,
+    matchup_count,
     tally,
     tally_by_competitor,
 )
@@ -107,6 +109,79 @@ def _session(
 
 def _keys(matchups: tuple[Matchup, ...]) -> list[tuple[str, str, str]]:
     return [(m.backend_model, m.task_id, m.competitor) for m in matchups]
+
+
+# Fixed token amounts: Brief is constant, competitors are set strictly above (a
+# Brief win) or strictly below (a Brief loss) so every cell is decisive (0 ties).
+_BRIEF_TOKENS = 1000
+_COMPETITOR_WIN_TOKENS = 2000  # competitor pricier -> Brief cheaper
+_COMPETITOR_LOSS_TOKENS = 500  # competitor cheaper -> Brief loses
+
+
+def _full_sweep_sessions() -> list[SessionRecord]:
+    """Reconstruct the paper's 3600-matchup sweep from session records.
+
+    12 backend models x 30 tasks = 360 cells. For each competitor, its published
+    Brief-win count (COMPETITOR_WINS) determines how many cells Brief wins: the
+    first ``wins`` cells get a pricier competitor, the rest a cheaper one. Brief
+    spends a constant amount everywhere, so a cell is a Brief win iff the
+    competitor priced above it.
+    """
+    models = [f"llm-{i:02d}" for i in range(N_BACKEND_MODELS)]
+    tasks = [f"swe-{j:03d}" for j in range(N_TASKS)]
+    cells = [(model, task) for model in models for task in tasks]
+    assert len(cells) == MATCHUPS_PER_COMPETITOR
+
+    sessions = [_session(model, task, "brief", _BRIEF_TOKENS) for model, task in cells]
+    for competitor, wins in COMPETITOR_WINS.items():
+        for index, (model, task) in enumerate(cells):
+            tokens = _COMPETITOR_WIN_TOKENS if index < wins else _COMPETITOR_LOSS_TOKENS
+            sessions.append(_session(model, task, competitor, tokens))
+    return sessions
+
+
+class TestFullSweepTournament:
+    """Reconstruct tab:tok_context_winrate and tab:tok_context_by_competitor."""
+
+    def test_sweep_size_is_3600(self) -> None:
+        assert matchup_count(N_BACKEND_MODELS, N_TASKS, N_COMPETITORS) == TOTAL_MATCHUPS
+        assert N_BACKEND_MODELS * N_TASKS * N_COMPETITORS == 3600
+        assert build_matchups(_full_sweep_sessions()) != ()
+        assert len(build_matchups(_full_sweep_sessions())) == TOTAL_MATCHUPS
+
+    def test_overall_win_rate_is_2880_of_3600(self) -> None:
+        result = tally(build_matchups(_full_sweep_sessions()))
+        assert result.wins == BRIEF_WINS  # 2880
+        assert result.losses == BRIEF_LOSSES  # 720
+        assert result.ties == 0
+        assert result.total == TOTAL_MATCHUPS
+        # 2880 / 3600 = 0.800 exactly (= 4/5).
+        assert Fraction(result.wins, result.total) == Fraction(4, 5)
+        assert result.rate == 0.8
+        assert round(result.rate * 100, 1) == 80.0
+
+    def test_zero_ties_every_cell_decisive(self) -> None:
+        matchups = build_matchups(_full_sweep_sessions())
+        assert all(m.outcome is not MatchupOutcome.TIE for m in matchups)
+
+    def test_per_competitor_matches_published_table(self) -> None:
+        by_competitor = tally_by_competitor(build_matchups(_full_sweep_sessions()))
+        assert set(by_competitor) == set(COMPETITOR_WINS)
+        for competitor, win_rate in by_competitor.items():
+            assert win_rate.total == MATCHUPS_PER_COMPETITOR  # 360
+            assert win_rate.ties == 0
+            assert win_rate.wins == COMPETITOR_WINS[competitor]
+            assert round(win_rate.rate * 100, 1) == COMPETITOR_WIN_PCT[competitor]
+        # Per-competitor wins sum to the overall 2880.
+        assert sum(wr.wins for wr in by_competitor.values()) == BRIEF_WINS
+
+    def test_win_rate_band_68_6_to_86_7(self) -> None:
+        by_competitor = tally_by_competitor(build_matchups(_full_sweep_sessions()))
+        pct = {c: round(wr.rate * 100, 1) for c, wr in by_competitor.items()}
+        assert min(pct.values()) == 68.6  # Oiya
+        assert max(pct.values()) == 86.7  # Oracle Summary
+        assert pct["oiya"] == 68.6
+        assert pct["oracle_summary"] == 86.7
 
 
 class TestSessionRecord:
