@@ -22,6 +22,8 @@ import numpy as np
 import pytest
 
 from membench.retrieval._native import cosine_topk_reference
+from membench.retrieval.bm25_plus import bm25_plus_scores as py_bm25_plus_scores
+from membench.retrieval.rank_fusion_graph import reciprocal_rank_fusion as py_rrf
 from membench.theory.crossover import find_crossover_depth
 from membench.theory.crossover import g as py_gap
 from membench.theory.decay import SimilarityDecayModel
@@ -135,3 +137,73 @@ def test_rust_crossover_search_matches_python(tau: float) -> None:
     assert (win_lo, win_hi) == ref.win_region
     # Rust bisection vs SciPy Brent: same simple root of g(d) - tau, ~1e-9.
     assert d_cont == pytest.approx(ref.d_star_continuous, abs=1e-9, rel=0)
+
+
+# ---------------------------------------------------------------------------
+# verify.rs parity: BM25+ (bm25_plus.py)
+# ---------------------------------------------------------------------------
+
+
+def _bm25_corpus() -> tuple[list[list[str]], list[str]]:
+    corpus = [
+        ["alpha", "beta", "beta"],
+        ["beta", "gamma"],
+        ["alpha", "alpha", "delta", "beta"],
+        ["gamma", "gamma", "gamma"],
+        ["epsilon"],
+    ]
+    query = ["beta", "alpha", "gamma"]
+    return corpus, query
+
+
+@pytest.mark.parametrize("delta", [0.0, 1.0])
+def test_rust_bm25_plus_matches_python(delta: float) -> None:
+    import membench_kernels
+
+    corpus, query = _bm25_corpus()
+    ref = py_bm25_plus_scores(corpus, query, k1=1.5, b=0.75, delta=delta)
+    got = membench_kernels.bm25_plus_scores(corpus, query, 1.5, 0.75, delta)
+    np.testing.assert_allclose(np.asarray(got), ref, atol=1e-12, rtol=0)
+
+
+def test_rust_bm25_plus_single_doc_symbolic_golden() -> None:
+    import membench_kernels
+
+    # golden_pack.md D.1: ln(2)*17/7, the exact BM25+ score for the single-doc case.
+    got = membench_kernels.bm25_plus_scores([["alpha", "beta", "beta"]], ["beta"], 1.5, 0.75, 1.0)
+    assert got[0] == pytest.approx(math.log(2.0) * 17.0 / 7.0, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# verify.rs parity: reciprocal rank fusion (rank_fusion_graph.py)
+# ---------------------------------------------------------------------------
+
+
+def test_rust_rrf_matches_python_and_orders_c_over_b() -> None:
+    import membench_kernels
+
+    rankings = [["a", "b", "c"], ["c", "b"]]
+    ref = py_rrf(rankings, k=60)
+    ids, scores = membench_kernels.reciprocal_rank_fusion(rankings, 60)
+    got = dict(zip(ids, scores, strict=True))
+
+    assert set(got) == set(ref)
+    for key, value in ref.items():
+        assert got[key] == pytest.approx(value, abs=1e-12, rel=0)
+
+    # golden_pack.md D.3: exact-fraction tie-break c=124/3843 > b=124/3844.
+    assert got["c"] > got["b"]
+    ranked = sorted(got, key=lambda i: -got[i])
+    assert ranked == ["c", "b", "a"]
+
+
+@pytest.mark.parametrize("k", [1, 10, 60, 200])
+def test_rust_rrf_matches_python_across_k(k: int) -> None:
+    import membench_kernels
+
+    rankings = [["x", "y", "z", "w"], ["z", "y"], ["w", "x", "z"]]
+    ref = py_rrf(rankings, k=k)
+    ids, scores = membench_kernels.reciprocal_rank_fusion(rankings, k)
+    got = dict(zip(ids, scores, strict=True))
+    for key, value in ref.items():
+        assert got[key] == pytest.approx(value, abs=1e-12, rel=0)
