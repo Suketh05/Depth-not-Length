@@ -23,6 +23,7 @@ from membench.agents.session import (
     efficiency_score,
     tokens_per_resolved_point,
 )
+from membench.types import Task
 
 
 def _usd_tol(decimals: int) -> float:
@@ -277,4 +278,206 @@ class TestSessionLedger:
                 "gpt-5.5",
                 "none",
                 (TurnLedger(1, 10, 1, resolved=True), TurnLedger(2, 10, 1, resolved=False)),
+            )
+
+
+class TestSplitInvariance:
+    """Session tokens and cost depend only on per-turn totals, not the split."""
+
+    def test_session_tokens_and_cost_invariant_to_prompt_completion_split(self) -> None:
+        # Two ledgers with the same per-turn TOTALS but different prompt/completion
+        # splits (the paper does not publish the split) must agree on every reported
+        # quantity -- session tokens and blended cost.
+        totals = (1598, 203, 34)
+        all_prompt = Session(
+            "gpt-5.5",
+            "brief_graph",
+            tuple(TurnLedger(i, t, 0, resolved=(i == 3)) for i, t in enumerate(totals, start=1)),
+        )
+        mixed = Session(
+            "gpt-5.5",
+            "brief_graph",
+            (
+                TurnLedger(1, 1200, 398, resolved=False),
+                TurnLedger(2, 150, 53, resolved=False),
+                TurnLedger(3, 20, 14, resolved=True),
+            ),
+        )
+        assert all_prompt.session_tokens == mixed.session_tokens == 1835
+        assert all_prompt.blended_cost_dollars() == mixed.blended_cost_dollars()
+        assert all_prompt.convergence_turn == mixed.convergence_turn == 3
+
+
+def _make_system(arm: str) -> tuple[object, object]:
+    """Return a fresh (llm, memory) pair; a memory arm is single-use per session."""
+    import membench.retrieval.builtin  # noqa: F401  (registers the builtin arms)
+    from membench.agents.combos import Combo, build_system
+
+    return build_system(Combo(arm, "claude", arm), offline=True)
+
+
+def _stripped_task() -> Task:
+    from membench.types import MemoryItem, Scorer, SpecVariant, Task
+
+    corpus = (
+        MemoryItem(
+            "D-1",
+            "primary buttons must use the DateRangePicker component",
+            {"node_type": "constraint"},
+        ),
+        MemoryItem(
+            "D-1-rationale",
+            "the export dialog call to action should be accessible",
+            {"node_type": "justification", "constrains": "D-1"},
+        ),
+        MemoryItem("D-2", "unrelated note about logging"),
+    )
+    return Task(
+        task_id="sess-1",
+        dataset="dcbench",
+        query="make the export dialog call to action accessible",
+        repo_ref="github.com/x/y@a",
+        memory_corpus=corpus,
+        governing_decisions=("D-1",),
+        depth=3,
+        spec_variant=SpecVariant.STRIPPED,
+        scorer=Scorer.COMPLIANCE,
+    )
+
+
+def _honours_governing(_turn: int, text: str, _task: Task) -> bool:
+    """A compliance-style predicate: the governing identifier is echoed back."""
+    return "DateRangePicker" in text
+
+
+class TestRunSession:
+    def test_context_arm_resolves_on_turn_one(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        llm, memory = _make_system("brief_graph")
+        session = run_session(
+            _stripped_task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph",
+            resolves_at=_honours_governing,
+            max_turns=8,
+        )
+        # The typed store recovers D-1 through the CONSTRAINS link into turn-1
+        # context, so the stub honours it and the session collapses immediately.
+        assert session.convergence_turn == 1
+        assert session.num_turns == 1
+        assert session.arm_label == "brief_graph"
+        assert session.reported_dollars > 0
+
+    def test_no_context_runs_to_the_turn_cap_unresolved(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        llm, memory = _make_system("none")
+        session = run_session(
+            _stripped_task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=10_000),
+            arm_name="none",
+            resolves_at=_honours_governing,
+            max_turns=6,
+        )
+        # No context layer -> the governing decision never enters the prompt -> the
+        # session runs the full budget of turns and never resolves.
+        assert session.convergence_turn is None
+        assert session.resolved is False
+        assert session.num_turns == 6
+
+    def test_convergence_at_a_scripted_turn(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        llm, memory = _make_system("none")
+        session = run_session(
+            _stripped_task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=10_000),
+            arm_name="none",
+            resolves_at=lambda turn, _text, _task: turn >= 3,
+            max_turns=8,
+        )
+        assert session.convergence_turn == 3
+        assert session.num_turns == 3
+
+    def test_is_deterministic(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        def run() -> object:
+            llm, memory = _make_system("brief_graph")
+            return run_session(
+                _stripped_task(),
+                memory,
+                llm,
+                RunConfig(budget_tokens=10_000),
+                arm_name="brief_graph",
+                resolves_at=lambda turn, _t, _k: turn >= 3,
+                max_turns=8,
+            )
+
+        assert run() == run()
+
+    def test_custom_follow_up_is_used(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        seen: list[int] = []
+
+        def follow_up(turn: int, _task: Task) -> str:
+            seen.append(turn)
+            return "please continue"
+
+        llm, memory = _make_system("none")
+        run_session(
+            _stripped_task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=10_000),
+            arm_name="none",
+            resolves_at=lambda turn, _t, _k: turn >= 3,
+            max_turns=8,
+            follow_up=follow_up,
+        )
+        assert seen == [2, 3]  # follow-up builds turns 2 and 3 only
+
+    def test_max_turns_one_is_single_turn(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        llm, memory = _make_system("none")
+        session = run_session(
+            _stripped_task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=10_000),
+            arm_name="none",
+            resolves_at=lambda *_: False,
+            max_turns=1,
+        )
+        assert session.num_turns == 1
+
+    def test_rejects_non_positive_max_turns(self) -> None:
+        from membench.agents.runner import RunConfig
+        from membench.agents.session import run_session
+
+        llm, memory = _make_system("none")
+        with pytest.raises(ValueError, match="max_turns"):
+            run_session(
+                _stripped_task(),
+                memory,
+                llm,
+                RunConfig(budget_tokens=10_000),
+                arm_name="none",
+                resolves_at=lambda *_: True,
+                max_turns=0,
             )
