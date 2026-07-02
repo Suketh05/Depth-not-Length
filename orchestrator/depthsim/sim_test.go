@@ -132,3 +132,78 @@ func TestSchedulingIndependence(t *testing.T) {
 		t.Fatalf("workers>n changed result: %d vs %d", huge.Successes, base.Successes)
 	}
 }
+
+// TestChanceFloor: when a hop's survival probability is 0, no trial can survive,
+// so the empirical P_ret is EXACTLY 0 with zero variance at every depth (the
+// degenerate floor of the series-system model). u_k in [0,1) is never < 0.
+func TestChanceFloor(t *testing.T) {
+	const n = 10000
+	cases := []struct {
+		name string
+		m    Model
+		arm  Arm
+	}{
+		{"structured q=0", Model{S0: 0.7, Rho: 0.67, Q: 0.0}, Structured},
+		{"similarity s0=0", Model{S0: 0.0, Rho: 0.67, Q: 0.97}, Similarity},
+	}
+	for _, c := range cases {
+		for d := 1; d <= 5; d++ {
+			e := c.m.SimulatePRet(c.arm, d, n, 8, simSeed)
+			if e.Successes != 0 {
+				t.Errorf("%s d=%d: expected 0 successes (chance floor), got %d", c.name, d, e.Successes)
+			}
+			if e.PHat() != 0 || e.StdErr() != 0 {
+				t.Errorf("%s d=%d: expected PHat=0, StdErr=0, got PHat=%v StdErr=%v", c.name, d, e.PHat(), e.StdErr())
+			}
+		}
+	}
+}
+
+// TestSaturation: when every hop survives with probability 1, every trial
+// succeeds, so the empirical P_ret is EXACTLY 1 (n successes) at every depth.
+// u_k in [0,1) is always < 1. Structured q=1 and similarity s0=rho=1 both
+// saturate.
+func TestSaturation(t *testing.T) {
+	const n = 10000
+	cases := []struct {
+		name string
+		m    Model
+		arm  Arm
+	}{
+		{"structured q=1", Model{S0: 0.7, Rho: 0.67, Q: 1.0}, Structured},
+		{"similarity s0=rho=1", Model{S0: 1.0, Rho: 1.0, Q: 0.97}, Similarity},
+	}
+	for _, c := range cases {
+		for d := 1; d <= 5; d++ {
+			// Analytic value must be exactly 1.0 first.
+			if got := c.m.AnalyticPRet(c.arm, d); got != 1.0 {
+				t.Fatalf("%s d=%d: analytic P_ret=%v, expected exactly 1.0", c.name, d, got)
+			}
+			e := c.m.SimulatePRet(c.arm, d, n, 8, simSeed)
+			if e.Successes != n {
+				t.Errorf("%s d=%d: expected %d successes (saturation), got %d", c.name, d, n, e.Successes)
+			}
+			if e.PHat() != 1.0 {
+				t.Errorf("%s d=%d: expected PHat=1.0, got %v", c.name, d, e.PHat())
+			}
+		}
+	}
+}
+
+// TestEmptyAndDegenerate: zero or negative trial counts return a well-formed
+// empty Estimate (no panic, no divide-by-zero), and a zero-worker request is
+// clamped to a single worker.
+func TestEmptyAndDegenerate(t *testing.T) {
+	m := PaperCalibration
+	for _, n := range []int{0, -1} {
+		e := m.SimulatePRet(Similarity, 3, n, 8, simSeed)
+		if e.Trials != 0 || e.Successes != 0 || e.PHat() != 0 || e.StdErr() != 0 {
+			t.Fatalf("n=%d: expected empty Estimate, got %+v (PHat=%v)", n, e, e.PHat())
+		}
+	}
+	zeroWorkers := m.SimulatePRet(Structured, 2, 1000, 0, simSeed)
+	oneWorker := m.SimulatePRet(Structured, 2, 1000, 1, simSeed)
+	if zeroWorkers.Successes != oneWorker.Successes {
+		t.Fatalf("workers=0 not clamped to 1: %d vs %d", zeroWorkers.Successes, oneWorker.Successes)
+	}
+}
