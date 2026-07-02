@@ -60,6 +60,7 @@ __all__ = [
     "DEFAULT_SIGMA",
     "TYPED_LINK_KEYS",
     "CaptureCondition",
+    "apply_condition",
     "shred_scattered",
     "strip_edges",
 ]
@@ -275,3 +276,53 @@ def shred_scattered(task: Task, sigma: int = DEFAULT_SIGMA, *, seed: int = 0) ->
     for gold_id in task.governing_decisions:
         gold.extend(fragment_ids.get(gold_id, (gold_id,)))
     return replace(task, memory_corpus=tuple(corpus), governing_decisions=tuple(gold))
+
+
+def apply_condition(
+    task: Task,
+    condition: CaptureCondition | str,
+    *,
+    sigma: int = DEFAULT_SIGMA,
+    seed: int = 0,
+) -> Task:
+    """Apply one of the three storage conditions of Subsection ``sec:capconds``.
+
+    The single dispatch point the experiment driver uses, so every condition is
+    produced by exactly one code path:
+
+    * ``CAPTURED`` -- the identity transform. The task is returned as-is (it is
+      frozen, so sharing it is safe); this is the same fairness-lock corpus
+      every other experiment in the paper consumes (Section ``sec:offline``).
+    * ``DISCRETE_NO_LINKS`` -- :func:`strip_edges`.
+    * ``RAW_SCATTERED`` -- :func:`shred_scattered` (which also strips links).
+
+    Parameters
+    ----------
+    task
+        The CAPTURED-condition task to transform.
+    condition
+        A :class:`CaptureCondition` member or its string value.
+    sigma
+        Fragment count for the Raw-scattered condition (ignored otherwise).
+    seed
+        Shred seed for the Raw-scattered condition (ignored otherwise).
+
+    Returns
+    -------
+    Task
+        The task under the requested storage condition, with the same
+        ``task_id`` -- conditions are *paired* per task, as in the paper's
+        "n=40 tasks per depth, paired across conditions" (Table ``tab:capexp``).
+
+    Raises
+    ------
+    ValueError
+        If ``condition`` is not one of the three conditions, or ``sigma < 1``
+        for the Raw-scattered condition.
+    """
+    member = CaptureCondition(condition)
+    if member is CaptureCondition.CAPTURED:
+        return task
+    if member is CaptureCondition.DISCRETE_NO_LINKS:
+        return strip_edges(task)
+    return shred_scattered(task, sigma, seed=seed)
