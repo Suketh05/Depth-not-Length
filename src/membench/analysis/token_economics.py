@@ -40,11 +40,14 @@ from enum import Enum
 
 __all__ = [
     "BRIEF_SYSTEM",
+    "CompetitorRecord",
     "Matchup",
     "MatchupOutcome",
     "SessionRecord",
+    "TournamentSummary",
     "decide_matchup",
     "pair_matchups",
+    "run_tournament",
     "session_tokens_from_turns",
     "sweep_matchup_count",
 ]
@@ -283,3 +286,146 @@ def pair_matchups(
             )
         )
     return matchups
+
+
+@dataclass(frozen=True, slots=True)
+class CompetitorRecord:
+    """Win/loss/tie tally of the Brief-vs-one-competitor slice of the tournament.
+
+    One row of ``tab:tok_context_by_competitor`` (360 matchups per layer in the
+    paper's sweep).
+    """
+
+    competitor: str
+    matchups: int
+    wins: int
+    losses: int
+    ties: int
+
+    def __post_init__(self) -> None:
+        """Validate that the tally partitions the matchups."""
+        if min(self.matchups, self.wins, self.losses, self.ties) < 0:
+            raise ValueError("tally counts must be non-negative")
+        if self.wins + self.losses + self.ties != self.matchups:
+            raise ValueError(
+                f"wins + losses + ties must equal matchups: "
+                f"{self.wins} + {self.losses} + {self.ties} != {self.matchups}"
+            )
+
+    @property
+    def win_rate(self) -> float | None:
+        """Brief's win fraction ``wins / matchups`` (``None`` on an empty slice)."""
+        if self.matchups == 0:
+            return None
+        return self.wins / self.matchups
+
+    @property
+    def win_rate_pct(self) -> float | None:
+        """Brief's win rate in percent, as printed in ``tab:tok_context_by_competitor``."""
+        rate = self.win_rate
+        return None if rate is None else 100.0 * rate
+
+
+@dataclass(frozen=True, slots=True)
+class TournamentSummary:
+    """Overall + per-competitor tallies of a session-cheaper tournament.
+
+    The overall block is ``tab:tok_context_winrate``; ``per_competitor`` is
+    ``tab:tok_context_by_competitor``. Ties count in the matchup denominator
+    but in neither wins nor losses.
+    """
+
+    matchups: int
+    wins: int
+    losses: int
+    ties: int
+    per_competitor: Mapping[str, CompetitorRecord]
+
+    @property
+    def win_rate(self) -> float | None:
+        """Brief's overall win fraction (paper: ``2880 / 3600 = 0.800``)."""
+        if self.matchups == 0:
+            return None
+        return self.wins / self.matchups
+
+    @property
+    def win_rate_pct(self) -> float | None:
+        """Overall win rate in percent (paper headline: 80.0%)."""
+        rate = self.win_rate
+        return None if rate is None else 100.0 * rate
+
+    @classmethod
+    def from_matchups(cls, matchups: Iterable[Matchup]) -> TournamentSummary:
+        """Tally an iterable of resolved matchups into the two paper tables.
+
+        Parameters
+        ----------
+        matchups:
+            Resolved (LLM x task x competitor) cells, e.g. from
+            :func:`pair_matchups`.
+
+        Returns
+        -------
+        TournamentSummary
+            Overall and per-competitor win/loss/tie counts; competitors are
+            keyed by their system id, in first-seen order.
+        """
+        total = wins = losses = ties = 0
+        tallies: dict[str, list[int]] = {}
+        for matchup in matchups:
+            tally = tallies.setdefault(matchup.competitor, [0, 0, 0, 0])
+            tally[0] += 1
+            total += 1
+            outcome = matchup.outcome
+            if outcome is MatchupOutcome.BRIEF_WIN:
+                tally[1] += 1
+                wins += 1
+            elif outcome is MatchupOutcome.BRIEF_LOSS:
+                tally[2] += 1
+                losses += 1
+            else:
+                tally[3] += 1
+                ties += 1
+        per_competitor = {
+            competitor: CompetitorRecord(
+                competitor=competitor,
+                matchups=tally[0],
+                wins=tally[1],
+                losses=tally[2],
+                ties=tally[3],
+            )
+            for competitor, tally in tallies.items()
+        }
+        return cls(
+            matchups=total,
+            wins=wins,
+            losses=losses,
+            ties=ties,
+            per_competitor=per_competitor,
+        )
+
+
+def run_tournament(
+    brief_sessions: Iterable[SessionRecord],
+    competitor_sessions: Iterable[SessionRecord],
+) -> TournamentSummary:
+    """Pair and tally the full session-cheaper tournament in one call.
+
+    Composition of :func:`pair_matchups` and
+    :meth:`TournamentSummary.from_matchups`; on the paper's sweep this yields
+    the 3600-matchup summary of ``tab:tok_context_winrate`` and the
+    per-competitor breakdown of ``tab:tok_context_by_competitor``.
+
+    Parameters
+    ----------
+    brief_sessions:
+        One Brief session per (LLM, task) cell.
+    competitor_sessions:
+        Every competitor session in the sweep.
+
+    Returns
+    -------
+    TournamentSummary
+        Overall and per-competitor tallies.
+    """
+    return TournamentSummary.from_matchups(pair_matchups(brief_sessions, competitor_sessions))
