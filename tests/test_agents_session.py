@@ -317,6 +317,32 @@ class TestSessionLedger:
             )
 
 
+class TestCostEdgeCases:
+    """Zero-token / empty and out-of-domain cost behaviour."""
+
+    def test_empty_session_costs_nothing(self) -> None:
+        assert Session("gpt-5.5", "none", ()).blended_cost_dollars() == 0.0
+
+    def test_zero_token_turn_costs_nothing(self) -> None:
+        # A turn that made a call but billed zero tokens (a degenerate chance-floor
+        # case) contributes no tokens and no dollars.
+        session = Session("gpt-5.5", "none", (TurnLedger(1, 0, 0, resolved=False),))
+        assert session.session_tokens == 0
+        assert session.blended_cost_dollars() == 0.0
+
+    def test_unpriced_session_model_raises(self) -> None:
+        # A session on a backend with no blended rate must fail loud, not zero-cost.
+        session = Session(
+            "claude-sonnet-4-6", "brief_graph", (TurnLedger(1, 100, 20, resolved=True),)
+        )
+        with pytest.raises(KeyError, match="no blended session rate"):
+            session.blended_cost_dollars()
+
+    def test_session_blended_cost_rejects_negative_tokens(self) -> None:
+        with pytest.raises(ValueError, match="session_tokens"):
+            session_blended_cost("gpt-5.5", -1)
+
+
 class TestSplitInvariance:
     """Session tokens and cost depend only on per-turn totals, not the split."""
 
