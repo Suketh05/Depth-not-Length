@@ -316,6 +316,156 @@ pub fn bm25_plus_scores(
 }
 
 // ---------------------------------------------------------------------------
+// C. Statistics: Wilson score interval (factorization.py; Wilson 1927)
+// ---------------------------------------------------------------------------
+
+/// Error function via the all-positive scaled Maclaurin series
+/// `erf(x) = (2/sqrt(pi)) e^{-x^2} x sum_{n>=0} (2x^2)^n / (1*3*...*(2n+1))`.
+///
+/// Every term is positive, so there is no catastrophic cancellation and the sum
+/// reaches full double precision for the `|x| <= ~4` range the probit needs. Used
+/// only to Newton-refine the inverse-normal seed below.
+fn erf(x: f64) -> f64 {
+    if x == 0.0 {
+        return 0.0;
+    }
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let a = x.abs();
+    let a2 = a * a;
+    let mut term = a; // n = 0 term (before the 2/sqrt(pi) e^{-x^2} factor)
+    let mut sum = term;
+    let mut n = 1.0;
+    loop {
+        term *= 2.0 * a2 / (2.0 * n + 1.0);
+        sum += term;
+        if term <= sum * 1e-18 || n > 300.0 {
+            break;
+        }
+        n += 1.0;
+    }
+    sign * std::f64::consts::FRAC_2_SQRT_PI * (-a2).exp() * sum
+}
+
+/// Standard-normal CDF `Phi(x) = 0.5 * (1 + erf(x / sqrt(2)))`.
+fn normal_cdf(x: f64) -> f64 {
+    0.5 * (1.0 + erf(x * std::f64::consts::FRAC_1_SQRT_2))
+}
+
+/// Peter Acklam's rational approximation to the inverse standard-normal CDF; used
+/// as a seed (relative error < 1.15e-9) that Newton refinement drives to full
+/// double precision.
+// Acklam's published coefficients carry 16 significant digits (correctly rounded
+// nearest doubles); keep them verbatim for provenance.
+#[allow(clippy::excessive_precision)]
+fn acklam_ppf(p: f64) -> f64 {
+    const A: [f64; 6] = [
+        -3.969683028665376e+01,
+        2.209460984245205e+02,
+        -2.759285104469687e+02,
+        1.383577518672690e+02,
+        -3.066479806614716e+01,
+        2.506628277459239e+00,
+    ];
+    const B: [f64; 5] = [
+        -5.447609879822406e+01,
+        1.615858368580409e+02,
+        -1.556989798598866e+02,
+        6.680131188771972e+01,
+        -1.328068155288572e+01,
+    ];
+    const C: [f64; 6] = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e+00,
+        -2.549732539343734e+00,
+        4.374664141464968e+00,
+        2.938163982698783e+00,
+    ];
+    const D: [f64; 4] = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e+00,
+        3.754408661907416e+00,
+    ];
+    const P_LOW: f64 = 0.02425;
+    let p_high = 1.0 - P_LOW;
+    if p < P_LOW {
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else if p <= p_high {
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
+            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
+    } else {
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    }
+}
+
+/// Inverse standard-normal CDF (probit) to full double precision.
+///
+/// Works in the upper half `p' = max(p, 1-p) >= 0.5` (so the Newton residual
+/// `Phi(x) - p'` is evaluated with a non-negative erf and never cancels), then
+/// restores the sign. Two Newton steps take Acklam's ~1e-9 seed to ~1e-15.
+fn probit(p: f64) -> Result<f64, String> {
+    if !(0.0 < p && p < 1.0) {
+        return Err(format!("probit argument must be in (0, 1), got {p}"));
+    }
+    let (pp, sign) = if p < 0.5 { (1.0 - p, -1.0) } else { (p, 1.0) };
+    let mut x = acklam_ppf(pp);
+    let inv_sqrt_2pi = 1.0 / (2.0 * std::f64::consts::PI).sqrt();
+    for _ in 0..2 {
+        let e = normal_cdf(x) - pp;
+        let pdf = (-0.5 * x * x).exp() * inv_sqrt_2pi;
+        x -= e / pdf;
+    }
+    Ok(sign * x)
+}
+
+/// Wilson score interval for a binomial proportion.
+///
+/// Verifies `membench.metrics.factorization.wilson_interval` (paper `eq:factor` /
+/// tab:realret use-factor kappa CI; Wilson 1927):
+/// `(p_hat + z^2/2n +/- z sqrt(p_hat(1-p_hat)/n + z^2/4n^2)) / (1 + z^2/n)`,
+/// clamped to `[0, 1]`, with `z` the standard-normal quantile for `confidence`.
+/// Fractional (pooled expected) counts are allowed.
+fn wilson_interval_impl(
+    successes: f64,
+    trials: f64,
+    confidence: f64,
+) -> Result<(f64, f64), String> {
+    if trials <= 0.0 {
+        return Err("trials must be positive".to_string());
+    }
+    if successes < 0.0 {
+        return Err("successes must be non-negative".to_string());
+    }
+    if !(0.0 < confidence && confidence < 1.0) {
+        return Err("confidence must be in (0, 1)".to_string());
+    }
+    let p_hat = (successes / trials).clamp(0.0, 1.0);
+    let z = probit(1.0 - (1.0 - confidence) / 2.0)?;
+    let z2 = z * z;
+    let denominator = 1.0 + z2 / trials;
+    let center = (p_hat + z2 / (2.0 * trials)) / denominator;
+    let margin =
+        z * (p_hat * (1.0 - p_hat) / trials + z2 / (4.0 * trials * trials)).sqrt() / denominator;
+    let low = (center - margin).max(0.0);
+    let high = (center + margin).min(1.0);
+    Ok((low, high))
+}
+
+/// Wilson score `(low, high)` interval. See [`wilson_interval_impl`].
+#[pyfunction]
+#[pyo3(signature = (successes, trials, confidence=0.95))]
+pub fn wilson_interval(successes: f64, trials: f64, confidence: f64) -> PyResult<(f64, f64)> {
+    wilson_interval_impl(successes, trials, confidence).map_err(to_py_err)
+}
+
+// ---------------------------------------------------------------------------
 // D. Retrieval scoring: Reciprocal Rank Fusion (rank_fusion_graph.py; Cormack 2009)
 // ---------------------------------------------------------------------------
 
@@ -664,5 +814,54 @@ mod tests {
     fn rrf_rejects_nonpositive_k() {
         assert!(reciprocal_rank_fusion_impl(&[toks(&["a"])], 0).is_err());
         assert!(reciprocal_rank_fusion_impl(&[toks(&["a"])], -1).is_err());
+    }
+
+    // ---- Wilson interval + supporting probit (golden_pack.md C.6) ----
+
+    // erf reference values (DLMF / standard tables) confirm the series is correct.
+    #[test]
+    fn erf_matches_reference_values() {
+        assert_eq!(erf(0.0), 0.0);
+        assert!((erf(1.0) - 0.842_700_792_949_714_9).abs() <= 1e-15);
+        assert!((erf(-1.0) + 0.842_700_792_949_714_9).abs() <= 1e-15);
+        assert!((erf(2.0) - 0.995_322_265_018_952_7).abs() <= 1e-15);
+    }
+
+    // The 95% two-sided z-quantile, asserted to full precision (golden_pack.md C.6).
+    #[test]
+    fn probit_matches_ninety_five_percent_z() {
+        let z = probit(0.975).unwrap();
+        assert!((z - 1.959963984540054).abs() <= 1e-12, "z={z}");
+    }
+
+    #[test]
+    fn probit_is_antisymmetric_and_zero_at_half() {
+        assert!((probit(0.5).unwrap()).abs() <= 1e-14);
+        assert!((probit(0.1).unwrap() + probit(0.9).unwrap()).abs() <= 1e-12);
+    }
+
+    // (8 successes, 10 trials): center 0.7167401600411333, margin 0.22657768850449148,
+    // (low, high) = (0.49016247153664183, 0.9433178485456247). VERBATIM golden C.6.
+    #[test]
+    fn wilson_interval_eight_of_ten_golden() {
+        let (low, high) = wilson_interval_impl(8.0, 10.0, 0.95).unwrap();
+        assert!((low - 0.49016247153664183).abs() <= 1e-12, "low={low}");
+        assert!((high - 0.9433178485456247).abs() <= 1e-12, "high={high}");
+    }
+
+    // (6, 8), p_hat = 0.75 (the pooled-kappa CI case): center 0.6688981087790299,
+    // margin 0.25962267846886106, (0.40927543031016883, 0.9285207872478909).
+    #[test]
+    fn wilson_interval_six_of_eight_golden() {
+        let (low, high) = wilson_interval_impl(6.0, 8.0, 0.95).unwrap();
+        assert!((low - 0.40927543031016883).abs() <= 1e-12, "low={low}");
+        assert!((high - 0.9285207872478909).abs() <= 1e-12, "high={high}");
+    }
+
+    #[test]
+    fn wilson_interval_rejects_bad_domain() {
+        assert!(wilson_interval_impl(1.0, 0.0, 0.95).is_err());
+        assert!(wilson_interval_impl(-1.0, 10.0, 0.95).is_err());
+        assert!(wilson_interval_impl(1.0, 10.0, 1.5).is_err());
     }
 }
