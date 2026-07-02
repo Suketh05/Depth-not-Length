@@ -7,7 +7,16 @@ LLM-judge acc, DMR fact F1), sec:pubbench, sec:grader (arm-blind judge protocol)
 
 from __future__ import annotations
 
-from membench.metrics.answer_scoring import answer_tokens, normalize_answer
+from fractions import Fraction
+
+import pytest
+
+from membench.metrics.answer_scoring import (
+    answer_exact_match,
+    answer_tokens,
+    normalize_answer,
+    token_f1,
+)
 
 
 class TestNormalizeAnswer:
@@ -43,3 +52,42 @@ class TestAnswerTokens:
     def test_empty_answer_is_empty_token_list(self) -> None:
         assert answer_tokens("the a an") == []
         assert answer_tokens("") == []
+
+
+class TestTokenF1:
+    def test_two_of_three_shared_tokens_golden(self) -> None:
+        # pred tokens = [red, green, blue]; gold tokens = [green, blue, yellow].
+        # num_same = 2 (green, blue). P = 2/3, R = 2/3, F1 = 2PR/(P+R) = 2/3.
+        assert token_f1("red green blue", "green blue yellow") == pytest.approx(
+            float(Fraction(2, 3))
+        )
+
+    def test_asymmetric_lengths_golden(self) -> None:
+        # pred [cat] vs gold [cat sat mat]: num_same=1, P=1/1=1, R=1/3,
+        # F1 = 2*1*(1/3)/(1 + 1/3) = (2/3)/(4/3) = 1/2.
+        assert token_f1("cat", "the cat sat mat") == pytest.approx(0.5)
+
+    def test_exact_match_is_one(self) -> None:
+        assert token_f1("The Answer", "answer!") == pytest.approx(1.0)
+
+    def test_disjoint_tokens_is_zero(self) -> None:
+        assert token_f1("alpha beta", "gamma delta") == 0.0
+
+    def test_both_empty_is_one_but_one_empty_is_zero(self) -> None:
+        # SQuAD boundary convention: both empty -> vacuously perfect; exactly one
+        # empty -> impossible overlap.
+        assert token_f1("the a an", "") == pytest.approx(1.0)
+        assert token_f1("something", "the a an") == 0.0
+
+    def test_multiset_semantics_penalise_repetition(self) -> None:
+        # pred [ha, ha, ha] vs gold [ha]: num_same = 1 (multiset min).
+        # P = 1/3, R = 1/1, F1 = 2*(1/3)*1/(1/3 + 1) = (2/3)/(4/3) = 1/2.
+        assert token_f1("ha ha ha", "ha") == pytest.approx(0.5)
+
+
+class TestAnswerExactMatch:
+    def test_match_up_to_normalization(self) -> None:
+        assert answer_exact_match("The Cat.", "cat") is True
+
+    def test_mismatch(self) -> None:
+        assert answer_exact_match("cat", "dog") is False
