@@ -162,3 +162,37 @@ assert_close(tost$p_value,  0.10713816216177832,    1e-12, "TOST:p_value")
 assert_true(tost$p_value >= 0.05, "TOST:not-equivalent (p>=alpha)")
 cat(sprintf("PASS (2) Schuirmann TOST: t_lower=%.2f t_upper=%.2f df=%g p=%.17g (not equivalent)\n",
             tost$t_lower, tost$t_upper, tost$df, tost$p_value))
+
+## ---------------------------------------------------------------------------
+## (3) PAVA isotonic regression (pool-adjacent-violators)
+##     Cross-checks src/membench/stats/isotonic.py; golden pack C.3.
+##     Non-decreasing L2 fit: sweep left-to-right, keep a stack of blocks
+##     (weighted mean + weight + span); whenever the incoming block violates
+##     monotonicity against its predecessor, pool them (weighted average) and
+##     repeat. Preserves the weighted sum; idempotent. A non-increasing fit is
+##     the mirror image: reverse, fit non-decreasing, reverse back.
+## ---------------------------------------------------------------------------
+pava_increasing <- function(y, w = rep(1, length(y))) {
+  vals <- as.numeric(y)
+  wts <- as.numeric(w)
+  stopifnot(length(vals) == length(wts), all(wts > 0))
+  bv <- numeric(0)  # block value (weighted mean)
+  bw <- numeric(0)  # block weight
+  bc <- integer(0)  # block span (# original points)
+  for (i in seq_along(vals)) {
+    bv <- c(bv, vals[i]); bw <- c(bw, wts[i]); bc <- c(bc, 1L)
+    while (length(bv) > 1L && bv[length(bv) - 1L] > bv[length(bv)]) {
+      m <- length(bv)
+      new_w <- bw[m - 1L] + bw[m]
+      new_v <- (bv[m - 1L] * bw[m - 1L] + bv[m] * bw[m]) / new_w
+      new_c <- bc[m - 1L] + bc[m]
+      keep <- seq_len(m - 2L)
+      bv <- c(bv[keep], new_v); bw <- c(bw[keep], new_w); bc <- c(bc[keep], new_c)
+    }
+  }
+  rep(bv, bc)
+}
+
+pava_decreasing <- function(y, w = rep(1, length(y))) {
+  rev(pava_increasing(rev(y), rev(w)))
+}
