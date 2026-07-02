@@ -77,5 +77,48 @@ public static class Theory
             throw new ArgumentOutOfRangeException(nameof(tau), tau, "tau must be >= 0");
     }
 
+    // ---- A.1 similarity recovery (eq:simceiling / Thm thm:sim) ----
+
+    /// <summary>
+    /// Similarity retrieval recovery ceiling P_ret^sim(d) = s0^d * rho^{d(d+1)/2}
+    /// (eq:simceiling, Thm thm:sim). The triangular exponent T = d(d+1)/2 = Sum_{k=1..d} k
+    /// makes the decay super-geometric (log-slope -> -inf). At the paper calibration this
+    /// gives 0.469, 0.14737387..., 0.031027225..., 0.004376633..., 0.000413630... for d=1..5.
+    /// </summary>
+    public static double SimilarityRecovery(int d, SurvivalModel model)
+    {
+        RequireDepth(d);
+        RequireModel(model);
+        double t = d * (d + 1) / 2.0; // triangular exponent Sum_{k=1..d} k
+        return Math.Pow(model.S0, d) * Math.Pow(model.Rho, t);
+    }
+
+    /// <summary>
+    /// Log-space form log P_ret^sim(d) = d*ln(s0) + (d(d+1)/2)*ln(rho) (eq:simceiling).
+    /// Stays finite where <see cref="SimilarityRecovery"/> underflows to 0.0 in float64
+    /// (golden pack A.1 underflow guard: s0=0.5, rho=0.3, d=60).
+    /// </summary>
+    public static double LogSimilarityRecovery(int d, SurvivalModel model)
+    {
+        RequireDepth(d);
+        RequireModel(model);
+        double t = d * (d + 1) / 2.0;
+        return d * Math.Log(model.S0) + t * Math.Log(model.Rho);
+    }
+
+    // ---- A.2 structured recovery (Thm thm:struct) ----
+
+    /// <summary>
+    /// Bounded-traversal recovery P_ret^struct(d) = q^d (Thm thm:struct): a typed store that
+    /// follows stored links pays only a steady per-edge cost q, with no similarity M_d penalty.
+    /// q=0.97 gives 0.97, 0.9409, 0.912673, 0.88529281, 0.8587340257 for d=1..5.
+    /// </summary>
+    public static double StructuredRecovery(int d, double q)
+    {
+        RequireDepth(d);
+        RequireHalfOpenUnit(q, nameof(q));
+        return Math.Pow(q, d);
+    }
+
     // === derivations appended below ===
 }
