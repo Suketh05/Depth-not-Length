@@ -41,7 +41,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from membench.metrics.compliance import decision_keywords, score_compliance_for_task
 from membench.metrics.factorization import wilson_interval
@@ -54,13 +54,21 @@ __all__ = [
     "DecisionVerdict",
     "Judge",
     "JudgeConfig",
+    "LLMJudge",
     "PromptOrder",
     "StubJudge",
     "agreement_rate",
     "build_judge_prompt",
     "judge_vs_rule_agreement",
+    "make_judge",
     "parse_verdict",
 ]
+
+# Guard the LLM client contract without importing the agents package at module
+# load (keeps the metrics layer light and side-effect free); the concrete client
+# is built lazily in make_judge.
+if TYPE_CHECKING:
+    from membench.agents.llm.base import LLMClient
 
 # The answer models in the paper are Claude (Sonnet) and GPT-5.1 (Section
 # "Reproducibility"). The grader must be a *distinct* model (Section sec:grader:
@@ -610,3 +618,120 @@ def _coerce_confidence(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 1.0
     return min(max(float(value), 0.0), 1.0)
+
+
+class LLMJudge:
+    """Live LLM compliance judge (paper Section sec:grader, optional backend).
+
+    Reuses any :class:`membench.agents.llm.base.LLMClient` as the grading model
+    (dependency-injected, so the pure prompt/parse path is exercised offline with
+    a fake client and only a real network backend makes it "live"). For each
+    governing decision it builds the arm-blind prompt (:func:`build_judge_prompt`),
+    calls the client, and parses the reply (:func:`parse_verdict`). The judge model
+    must be distinct from the answer models (Section sec:grader); construct it via
+    :func:`make_judge` to get a distinct-by-default Claude tier.
+
+    Parameters
+    ----------
+    client
+        The grading LLM client.
+    config
+        The recorded grader configuration; ``prompt_order`` flows into the prompt.
+    max_tokens
+        Completion budget for each grading call.
+    """
+
+    def __init__(
+        self, client: LLMClient, config: JudgeConfig | None = None, *, max_tokens: int = 256
+    ) -> None:
+        self._client = client
+        self._config = config if config is not None else JudgeConfig(model=client.model_name)
+        self._max_tokens = max_tokens
+
+    @property
+    def config(self) -> JudgeConfig:
+        """The recorded grader configuration."""
+        return self._config
+
+    def grade(self, task: Task, agent_answer: str) -> ComplianceVerdict:
+        """Grade ``agent_answer`` against ``task``'s governing decisions via the LLM.
+
+        Parameters
+        ----------
+        task
+            The evaluation unit; its corpus supplies each decision's invariant text.
+        agent_answer
+            The answer text produced by an undisclosed arm.
+
+        Returns
+        -------
+        ComplianceVerdict
+            One :class:`DecisionVerdict` per governing decision plus the roll-up.
+        """
+        verdicts: list[DecisionVerdict] = []
+        for decision_id in task.governing_decisions:
+            item = _invariant_reference(task, decision_id)
+            decision_text = item.text if item is not None else decision_id
+            system, user = build_judge_prompt(
+                decision_text,
+                decision_id,
+                agent_answer,
+                prompt_order=self._config.prompt_order,
+            )
+            response = self._client.complete(system, user, max_tokens=self._max_tokens)
+            verdicts.append(parse_verdict(response.text, decision_id))
+        return ComplianceVerdict(
+            task_id=task.task_id, verdicts=tuple(verdicts), config=self._config
+        )
+
+
+def make_judge(
+    backend: str = "stub",
+    *,
+    model: str = DEFAULT_JUDGE_MODEL,
+    config: JudgeConfig | None = None,
+    require_enforcement: bool = True,
+    seed: int = 0,
+) -> Judge:
+    """Construct a compliance judge (Section sec:grader).
+
+    ``backend="stub"`` (default) returns the deterministic offline
+    :class:`StubJudge`. ``backend="llm"`` returns a live :class:`LLMJudge` backed
+    by a real Anthropic client for the distinct judge ``model`` -- the
+    ``anthropic`` extra and client are imported lazily, so the offline pipeline
+    never pays for them. To grade offline with a custom or fake client, build
+    :class:`LLMJudge` directly with an injected client.
+
+    Parameters
+    ----------
+    backend
+        ``"stub"`` or ``"llm"``.
+    model
+        The judge model id (distinct from the answer models). Defaults to
+        :data:`DEFAULT_JUDGE_MODEL`.
+    config
+        An explicit configuration; when ``None`` one is built from ``model`` and
+        ``seed``.
+    require_enforcement
+        Passed to :class:`StubJudge`'s gaming guard (ignored for the LLM backend).
+    seed
+        Seed for the stub judge's deterministic confidence.
+
+    Returns
+    -------
+    Judge
+        The constructed judge.
+
+    Raises
+    ------
+    ValueError
+        If ``backend`` is not ``"stub"`` or ``"llm"``.
+    """
+    resolved = config if config is not None else JudgeConfig(model=model, seed=seed)
+    if backend == "stub":
+        return StubJudge(resolved, require_enforcement=require_enforcement)
+    if backend == "llm":
+        from membench.agents.llm.anthropic_client import AnthropicLLMClient
+
+        return LLMJudge(AnthropicLLMClient(model=resolved.model), resolved)
+    raise ValueError(f"unknown judge backend {backend!r}; expected 'stub' or 'llm'")
