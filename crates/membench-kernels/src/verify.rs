@@ -11,16 +11,20 @@
 //! compares each kernel against its Python twin to 1e-12 (looser only where a
 //! numeric root solver is involved, noted per test).
 //!
-//! Paper anchors (`/Users/.../depth_not_length_FIXED.tex`):
+//! Every golden constant asserted in the pure-Rust unit tests below is quoted
+//! VERBATIM from the canonical golden pack (sections A.1, A.3, C.6, D.1, D.3) —
+//! never a value produced by running this code — and each maps to a labelled
+//! anchor in the paper (`depth_not_length_FIXED.tex`):
 //!   * similarity / structured recovery — Thm `thm:sim` (`eq:simceiling`),
 //!     Thm `thm:struct`; §`sec:depth` synthetic operating point s0=0.70, rho=0.67,
-//!     q=0.97.
-//!   * gap and crossover — `eq:gd`, Prop `prop:cross`.
-//!   * BM25+ scorer — retrieval harness §`sec:offline`; Lv & Zhai 2011.
+//!     q=0.97 (golden pack A.1/A.2).
+//!   * gap and crossover — `eq:gd`, Prop `prop:cross` (golden pack A.3).
+//!   * BM25+ scorer — retrieval harness §`sec:offline`; Lv & Zhai 2011
+//!     (golden pack D.1).
 //!   * reciprocal rank fusion — `hybrid_rrf`/`rank_fusion_graph` arm; Cormack et
-//!     al. 2009.
+//!     al. 2009 (golden pack D.3).
 //!   * Wilson interval — the use-factor kappa CI, `eq:factor` / tab:realret;
-//!     Wilson 1927.
+//!     Wilson 1927 (golden pack C.6).
 
 use std::collections::HashMap;
 
