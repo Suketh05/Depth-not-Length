@@ -46,6 +46,7 @@ Paper anchors
 
 from __future__ import annotations
 
+import statistics
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -57,9 +58,12 @@ __all__ = [
     "Matchup",
     "MatchupOutcome",
     "SessionRecord",
+    "SystemEconomics",
     "WinRate",
     "build_matchups",
+    "economics_by_system",
     "efficiency_score",
+    "matchup_count",
     "tally",
     "tally_by_competitor",
     "tokens_per_resolved_point",
@@ -456,3 +460,116 @@ def efficiency_score(
         msg = f"mean_session_tokens must be strictly positive, got {mean_session_tokens}"
         raise ValueError(msg)
     return scale * resolution_rate / mean_session_tokens
+
+
+@dataclass(frozen=True, slots=True)
+class SystemEconomics:
+    """Quality-vs-cost summary for one context layer (a row of tab:tok_agent_economics).
+
+    Parameters
+    ----------
+    system
+        The context-layer name.
+    n_sessions
+        Number of sessions aggregated.
+    resolution_rate
+        Fraction of the layer's sessions that resolved, in ``[0, 1]``.
+    mean_session_tokens
+        Mean session tokens spent across the layer's sessions.
+    tokens_per_resolved_point
+        Session tokens per percentage-point of resolution
+        (``None`` when the layer never resolves, so the ratio is undefined).
+    efficiency_score
+        Composite quality-per-token score (``0.0`` when nothing resolves).
+    """
+
+    system: str
+    n_sessions: int
+    resolution_rate: float
+    mean_session_tokens: float
+    tokens_per_resolved_point: float | None
+    efficiency_score: float
+
+
+def economics_by_system(
+    sessions: Iterable[SessionRecord],
+    *,
+    scale: float = EFFICIENCY_SCALE,
+) -> dict[str, SystemEconomics]:
+    """Aggregate per-layer resolution, cost and efficiency (``tab:tok_agent_economics``).
+
+    Groups the session records by context layer and, for each, computes the
+    resolution rate, mean session tokens, tokens per resolved point, and the
+    composite efficiency score -- the quality-vs-cost row the paper reports for
+    every layer in the sweep.
+
+    Parameters
+    ----------
+    sessions
+        Session records to aggregate.
+    scale
+        Passed through to :func:`efficiency_score`.
+
+    Returns
+    -------
+    dict of str to SystemEconomics
+        One summary per layer, keys sorted by layer name.
+    """
+    tokens_by_layer: dict[str, list[int]] = defaultdict(list)
+    resolved_by_layer: dict[str, int] = defaultdict(int)
+    for session in sessions:
+        tokens_by_layer[session.context_layer].append(session.session_tokens)
+        if session.resolved:
+            resolved_by_layer[session.context_layer] += 1
+
+    summaries: dict[str, SystemEconomics] = {}
+    for system in sorted(tokens_by_layer):
+        token_counts = tokens_by_layer[system]
+        n_sessions = len(token_counts)
+        resolution_rate = resolved_by_layer[system] / n_sessions
+        mean_tokens = statistics.fmean(token_counts)
+        cost_per_point = (
+            tokens_per_resolved_point(resolution_rate, mean_tokens)
+            if resolution_rate > 0.0
+            else None
+        )
+        summaries[system] = SystemEconomics(
+            system=system,
+            n_sessions=n_sessions,
+            resolution_rate=resolution_rate,
+            mean_session_tokens=mean_tokens,
+            tokens_per_resolved_point=cost_per_point,
+            efficiency_score=efficiency_score(resolution_rate, mean_tokens, scale=scale),
+        )
+    return summaries
+
+
+def matchup_count(n_backend_models: int, n_tasks: int, n_competitors: int) -> int:
+    """Return the number of matchups for a fully-crossed sweep.
+
+    The sweep is fully crossed, so the matchup count is the product of its three
+    dimensions (``tab:tok_context_winrate``: ``12 * 30 * 10 = 3600``).
+
+    Parameters
+    ----------
+    n_backend_models
+        Number of backend LLMs (12 in the paper's sweep).
+    n_tasks
+        Number of SWE-agent tasks (30).
+    n_competitors
+        Number of competing context layers compared against the typed store (10).
+
+    Returns
+    -------
+    int
+        ``n_backend_models * n_tasks * n_competitors``.
+
+    Raises
+    ------
+    ValueError
+        If any dimension is negative.
+    """
+    if n_backend_models < 0 or n_tasks < 0 or n_competitors < 0:
+        msg = "sweep dimensions must be non-negative"
+        raise ValueError(msg)
+    return n_backend_models * n_tasks * n_competitors
