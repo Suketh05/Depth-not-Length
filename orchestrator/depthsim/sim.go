@@ -245,3 +245,21 @@ func (m Model) SimulatePRet(a Arm, depth, n, workers int, baseSeed uint64) Estim
 	}
 	return Estimate{Arm: a, Depth: depth, Successes: total, Trials: n}
 }
+
+// EmpiricalCrossover returns the smallest depth in 1..maxDepth at which the
+// Structured arm's empirical P_ret strictly exceeds the Similarity arm's — the
+// Monte-Carlo analogue of the g(d) > 0 crossover (eq:gd, Prop prop:cross). With
+// enough trials it recovers the analytic closed-form d* = 1 under
+// PaperCalibration (structure already wins at depth 1). Returns 0 if structure
+// never leads within maxDepth. Both arms use the same baseSeed and worker count
+// so the comparison is apples-to-apples and scheduling-independent.
+func (m Model) EmpiricalCrossover(maxDepth, n, workers int, baseSeed uint64) int {
+	for d := 1; d <= maxDepth; d++ {
+		sim := m.SimulatePRet(Similarity, d, n, workers, baseSeed)
+		str := m.SimulatePRet(Structured, d, n, workers, baseSeed)
+		if str.PHat() > sim.PHat() {
+			return d
+		}
+	}
+	return 0
+}
