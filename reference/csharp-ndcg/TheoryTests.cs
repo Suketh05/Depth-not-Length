@@ -163,4 +163,56 @@ public class TheoryTests
         Assert.Equal(0.5, Theory.UniformBayesAccuracy(2), Tol);
         Assert.Equal(1.0 - Theory.UniformBayesAccuracy(4), Theory.ContextFreeFloor(4), Tol);
     }
+
+    // ---- B.1 use factor kappa = compliance/recall, every tab:realret row (eq:factor) ----
+
+    [Fact]
+    public void UseFactorFullPrecisionPerRow()
+    {
+        // Golden pack B.1: kappa = compliance/recall, full float64 (division is exact/deterministic).
+        Assert.Equal(0.7031484257871063, Theory.UseFactor(0.469, 0.667)!.Value, 1e-15); // brief
+        Assert.Equal(0.6393700787401575, Theory.UseFactor(0.406, 0.635)!.Value, 1e-15); // dense
+        Assert.Equal(0.6439024390243903, Theory.UseFactor(0.396, 0.615)!.Value, 1e-15); // hybrid_rrf
+        Assert.Equal(0.6374172185430463, Theory.UseFactor(0.385, 0.604)!.Value, 1e-15); // tfidf
+        Assert.Equal(0.5695364238410596, Theory.UseFactor(0.344, 0.604)!.Value, 1e-15); // bm25
+        Assert.Equal(0.6072041166380789, Theory.UseFactor(0.354, 0.583)!.Value, 1e-15); // rerank_ce
+        Assert.Equal(0.5636998254799302, Theory.UseFactor(0.323, 0.573)!.Value, 1e-15); // raptor
+    }
+
+    [Fact]
+    public void EveryRealRetRowRoundsToPublishedKappa()
+    {
+        // Paper tab:realret: each published 3-dp use factor equals round(compliance/recall, 3).
+        foreach (var row in Theory.RealRet)
+        {
+            double? kappa = Theory.UseFactor(row.Compliance, row.Recall);
+            Assert.NotNull(kappa); // every arm has positive recall, so kappa is defined
+            if (row.PublishedKappa is double published)
+                Assert.Equal(published, kappa!.Value, 3); // 3-dp rounding identity
+        }
+        // The typed store's kappa=0.703 is the only arm clearing the 0.56-0.64 similarity band.
+        double brief = Theory.UseFactor(0.469, 0.667)!.Value;
+        double bestSimilarity = Theory.UseFactor(0.396, 0.615)!.Value; // hybrid_rrf, top of the band
+        Assert.True(brief > 0.64);
+        Assert.True(bestSimilarity <= 0.645);
+        Assert.True(brief > bestSimilarity);
+    }
+
+    [Fact]
+    public void NoneArmKappaIsArithmeticOnlyNotPublished()
+    {
+        // Golden pack B.1: the `none` row's kappa (0.073/0.219 = 1/3) is deliberately UNPUBLISHED
+        // (no retrieval mechanism to factorize). It is arithmetic only, never a paper value.
+        var none = Theory.RealRet.Single(r => r.Arm == "none");
+        Assert.Null(none.PublishedKappa);
+        Assert.Equal(0.3333333333333333, Theory.UseFactor(none.Compliance, none.Recall)!.Value, 1e-15);
+    }
+
+    [Fact]
+    public void UseFactorUndefinedWhenRecallZero()
+    {
+        // Golden pack E.1: recall=0 -> kappa undefined (null), no crash.
+        Assert.Null(Theory.UseFactor(0.0, 0.0));
+        Assert.Null(Theory.UseFactor(0.5, 0.0));
+    }
 }
