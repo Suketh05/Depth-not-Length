@@ -352,7 +352,9 @@ class TestParseJudgeVerdict:
         assert verdict.config == self.CONFIG
 
     def test_noncompliant_verdict(self) -> None:
-        verdict = parse_judge_verdict("VERDICT: NONCOMPLIANT\nRATIONALE: never applied.", self.CONFIG)
+        verdict = parse_judge_verdict(
+            "VERDICT: NONCOMPLIANT\nRATIONALE: never applied.", self.CONFIG
+        )
         assert verdict.compliant is False
         assert verdict.parse_ok is True
 
@@ -394,7 +396,7 @@ class TestLLMComplianceJudge:
         judge = LLMComplianceJudge(client, max_tokens=128)
         case = _case(AUDIT, "just stream the rows")
         judge.judge(case)
-        (system, user, max_tokens), = client.calls
+        ((system, user, max_tokens),) = client.calls
         assert system == RUBRIC_SYSTEM_PROMPT
         assert max_tokens == 128
         assert (system, user) == (RUBRIC_SYSTEM_PROMPT, build_judge_prompt(case, judge.config)[1])
