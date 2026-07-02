@@ -17,6 +17,8 @@
  * keeps tools/seed free of a CSV library, per the ESM/NodeNext conventions of
  * this package (no new deps; relative imports carry an explicit .js extension).
  */
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 /**
  * Parse CSV text into a matrix of string cells (RFC 4180 subset).
@@ -84,4 +86,89 @@ export function parseCsv(text: string): string[][] {
     rows.push(row);
   }
   return rows;
+}
+
+/** A parsed CSV table: the header row and the remaining data rows. */
+export interface CsvTable {
+  readonly header: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+}
+
+/**
+ * Read and parse a CSV file into a header + data rows. Fully-blank rows (a lone
+ * empty trailing line) are dropped so a trailing newline never yields a phantom
+ * record. Throws if the file has no header row.
+ */
+export function readCsvTable(path: string): CsvTable {
+  const text = readFileSync(path, "utf-8");
+  const raw = parseCsv(text).filter((r) => !(r.length === 1 && r[0] === ""));
+  const header = raw[0];
+  if (header === undefined) {
+    throw new Error(`empty CSV (no header row): ${path}`);
+  }
+  return { header, rows: raw.slice(1) };
+}
+
+/** Index of a named column, throwing with context if it is absent. */
+export function columnIndex(header: readonly string[], name: string): number {
+  const idx = header.indexOf(name);
+  if (idx < 0) {
+    throw new Error(`missing expected column "${name}" (have: ${header.join(", ")})`);
+  }
+  return idx;
+}
+
+/** Parse a required numeric cell, throwing on empty/non-numeric with context. */
+export function parseNumberCell(cell: string | undefined, ctx: string): number {
+  if (cell === undefined || cell.trim() === "") {
+    throw new Error(`expected a number at ${ctx}, got empty cell`);
+  }
+  const value = Number(cell.trim());
+  if (Number.isNaN(value)) {
+    throw new Error(`expected a number at ${ctx}, got ${JSON.stringify(cell)}`);
+  }
+  return value;
+}
+
+/** Parse an optional numeric cell; an empty cell yields null (not an error). */
+export function parseOptionalNumberCell(cell: string | undefined, ctx: string): number | null {
+  if (cell === undefined || cell.trim() === "") {
+    return null;
+  }
+  return parseNumberCell(cell, ctx);
+}
+
+/** Read a required string cell, throwing on a missing column value. */
+export function stringCell(row: readonly string[], idx: number, ctx: string): string {
+  const cell = row[idx];
+  if (cell === undefined) {
+    throw new Error(`missing cell at ${ctx} (column index ${idx})`);
+  }
+  return cell;
+}
+
+/**
+ * Locate the repo's results/data directory by walking up from `startDir`.
+ * Deterministic and CWD-tolerant: the runtime verifier compiles out-of-tree and
+ * is launched from tools/seed, so we search upward for a directory that holds
+ * paper_realcode_pooled.csv. `MEMBENCH_DATA_DIR` overrides the search entirely.
+ */
+export function resolveDataDir(startDir: string = process.cwd()): string {
+  const override = process.env.MEMBENCH_DATA_DIR;
+  if (override !== undefined && override !== "") {
+    return override;
+  }
+  let dir = resolve(startDir);
+  for (let hops = 0; hops < 12; hops += 1) {
+    const candidate = join(dir, "results", "data");
+    if (existsSync(join(candidate, "paper_realcode_pooled.csv"))) {
+      return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  throw new Error("could not locate results/data (set MEMBENCH_DATA_DIR to override)");
 }
