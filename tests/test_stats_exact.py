@@ -15,7 +15,12 @@ from __future__ import annotations
 import pytest
 from scipy import stats
 
-from membench.stats.exact import ClopperPearsonInterval, clopper_pearson
+from membench.stats.exact import (
+    ClopperPearsonInterval,
+    McNemarExactResult,
+    clopper_pearson,
+    mcnemar_exact,
+)
 
 
 class TestClopperPearsonClosedForms:
@@ -114,3 +119,28 @@ class TestClopperPearsonValidation:
             clopper_pearson(5, 10, 0.0)
         with pytest.raises(ValueError, match="alpha"):
             clopper_pearson(5, 10, 1.0)
+
+
+class TestMcNemarExactGolden:
+    def test_b2_c8_two_sided_p_is_112_over_1024(self) -> None:
+        # Golden-pack C / gap G13: b = 2, c = 8 discordant pairs (n = 10). The exact
+        # two-sided p-value is twice the lower Binomial(10, 1/2) tail through k = 2:
+        #   p = 2 * (C(10,0) + C(10,1) + C(10,2)) / 2^10
+        #     = 2 * (1 + 10 + 45) / 1024
+        #     = 112 / 1024
+        #     = 0.109375  (exact dyadic rational).
+        res = mcnemar_exact(2, 8)
+        assert isinstance(res, McNemarExactResult)
+        assert res.p_value == 0.109375
+        assert res.p_value == 112 / 1024
+        assert res.statistic == -6.0  # b - c = 2 - 8
+        assert res.n_discordant == 10
+        assert res.b == 2 and res.c == 8
+        assert res.method == "mcnemar_exact"
+
+    def test_symmetric_in_b_and_c(self) -> None:
+        # The two-sided p-value depends only on {b, c} as a set; swapping flips the sign
+        # of the statistic but leaves the p-value identical (still 112/1024).
+        res = mcnemar_exact(8, 2)
+        assert res.p_value == 0.109375
+        assert res.statistic == 6.0
