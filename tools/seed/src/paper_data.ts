@@ -211,3 +211,88 @@ export function loadRealcodePooled(dataDir: string = resolveDataDir()): Realcode
     };
   });
 }
+
+/**
+ * One row of paper_token_economics.csv — a flat metric/value/note ledger backing
+ * tab:tok_context_winrate and tab:tok_context_by_competitor. The note field
+ * carries the paper label in brackets.
+ */
+export interface TokenEconomicsRow {
+  readonly metric: string;
+  readonly value: number;
+  readonly note: string;
+}
+
+/** Load results/data/paper_token_economics.csv, keyed lookups via {@link tokenMetric}. */
+export function loadTokenEconomics(dataDir: string = resolveDataDir()): TokenEconomicsRow[] {
+  const path = join(dataDir, "paper_token_economics.csv");
+  const table = readCsvTable(path);
+  const metricIdx = columnIndex(table.header, "metric");
+  const valueIdx = columnIndex(table.header, "value");
+  const noteIdx = columnIndex(table.header, "note");
+  return table.rows.map((row) => {
+    const metric = stringCell(row, metricIdx, `${path} metric`);
+    return {
+      metric,
+      value: parseNumberCell(row[valueIdx], `${path} ${metric}.value`),
+      note: row[noteIdx] ?? "",
+    };
+  });
+}
+
+/** Look up a single token-economics metric by name, throwing if absent. */
+export function tokenMetric(rows: readonly TokenEconomicsRow[], metric: string): number {
+  const found = rows.find((r) => r.metric === metric);
+  if (found === undefined) {
+    throw new Error(`token-economics metric "${metric}" not found`);
+  }
+  return found.value;
+}
+
+/** One row of paper_scorecard.csv (tab:scorecard): an outcome bucket and its count. */
+export interface ScorecardRow {
+  readonly outcome: string;
+  readonly count: number;
+}
+
+/** Load results/data/paper_scorecard.csv (tab:scorecard). */
+export function loadScorecard(dataDir: string = resolveDataDir()): ScorecardRow[] {
+  const path = join(dataDir, "paper_scorecard.csv");
+  const table = readCsvTable(path);
+  const outcomeIdx = columnIndex(table.header, "outcome");
+  const countIdx = columnIndex(table.header, "count");
+  return table.rows.map((row) => {
+    const outcome = stringCell(row, outcomeIdx, `${path} outcome`);
+    return { outcome, count: parseNumberCell(row[countIdx], `${path} ${outcome}.count`) };
+  });
+}
+
+/** Look up a single scorecard bucket count by outcome, throwing if absent. */
+export function scorecardCount(rows: readonly ScorecardRow[], outcome: string): number {
+  const found = rows.find((r) => r.outcome === outcome);
+  if (found === undefined) {
+    throw new Error(`scorecard outcome "${outcome}" not found`);
+  }
+  return found.count;
+}
+
+/**
+ * One arm of paper_synthetic_compliance.csv — synthetic-suite mean compliance
+ * over 120 tasks (Claude), the tab:synthall compliance column, listed best-first.
+ */
+export interface SyntheticComplianceRow {
+  readonly arm: string;
+  readonly compliance: number;
+}
+
+/** Load results/data/paper_synthetic_compliance.csv (tab:synthall compliance column). */
+export function loadSyntheticCompliance(dataDir: string = resolveDataDir()): SyntheticComplianceRow[] {
+  const path = join(dataDir, "paper_synthetic_compliance.csv");
+  const table = readCsvTable(path);
+  const armIdx = columnIndex(table.header, "arm");
+  const complianceIdx = columnIndex(table.header, "compliance");
+  return table.rows.map((row) => {
+    const arm = stringCell(row, armIdx, `${path} arm`);
+    return { arm, compliance: parseNumberCell(row[complianceIdx], `${path} ${arm}.compliance`) };
+  });
+}
