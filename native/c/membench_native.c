@@ -101,3 +101,21 @@ double mb_gap(double s0, double rho, double q, double d) {
   const double p_sim = pow(s0, d) * pow(rho, mb_triangular(d));
   return p_struct - p_sim;
 }
+
+/*
+ * Smallest integer depth d in [1, max_d] with g(d) > tau (strict); 0 if none.
+ *
+ * This is find_crossover_depth(...).d_star: it scans integer depths ascending
+ * and returns the first winner, matching numpy's `first True of g_curve > tau`.
+ * 0 encodes the Python `d_star is None` (structure never clears the overhead on
+ * the scanned range). max_d < 1 is treated as an empty scan (returns 0); the
+ * Python layer raises on that input before calling in.
+ */
+int mb_crossover_search(double s0, double rho, double q, double tau, int max_d) {
+  for (int d = 1; d <= max_d; ++d) {
+    if (mb_gap(s0, rho, q, (double)d) > tau) {
+      return d;
+    }
+  }
+  return 0;
+}
