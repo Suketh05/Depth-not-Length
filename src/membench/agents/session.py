@@ -279,6 +279,24 @@ class Session:
         priced = model or self.model
         return tuple(session_blended_cost(priced, tokens) for tokens in self.cumulative_tokens())
 
+    def as_row(self) -> dict[str, object]:
+        """Return a JSON-serialisable ledger row (mirrors ``AttemptRecord.as_dict``).
+
+        Emits exactly the columns the paper's session tables group over -- backend
+        model, context layer, turn count, per-turn totals, session total, the
+        convergence turn, and resolution -- so a session ledger can be dumped
+        alongside the single-turn attempt rows.
+        """
+        return {
+            "model": self.model,
+            "arm_label": self.arm_label,
+            "num_turns": self.num_turns,
+            "per_turn_tokens": [turn.total_tokens for turn in self.turns],
+            "session_tokens": self.session_tokens,
+            "convergence_turn": self.convergence_turn,
+            "resolved": self.resolved,
+        }
+
 
 def run_session(
     task: Task,
