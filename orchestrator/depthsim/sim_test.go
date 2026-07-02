@@ -207,3 +207,53 @@ func TestEmptyAndDegenerate(t *testing.T) {
 		t.Fatalf("workers=0 not clamped to 1: %d vs %d", zeroWorkers.Successes, oneWorker.Successes)
 	}
 }
+
+// TestCrossover: under PaperCalibration structure already wins at depth 1
+// (g(1) = 0.501 > 0), so both the closed-form and the empirical crossover are
+// d* = 1 (golden pack A.3, Prop prop:cross). The q=1 limit is monotone and also
+// crosses at depth 1.
+func TestCrossover(t *testing.T) {
+	m := PaperCalibration
+	if d := m.AnalyticCrossover(5); d != 1 {
+		t.Errorf("analytic crossover: got d*=%d, want 1", d)
+	}
+	if d := m.EmpiricalCrossover(5, simTrials, simWorkers, simSeed); d != 1 {
+		t.Errorf("empirical crossover: got d*=%d, want 1", d)
+	}
+	// q=1 half-line limit (test invariant, golden A.3): still crosses at d=1.
+	mono := Model{S0: 0.70, Rho: 0.67, Q: 1.0}
+	if d := mono.AnalyticCrossover(5); d != 1 {
+		t.Errorf("q=1 analytic crossover: got d*=%d, want 1", d)
+	}
+	// No-crossover case: if structure is uniformly weaker than similarity the
+	// locator reports 0. s0=rho=1 makes similarity saturate at 1.0 while q<1
+	// keeps structure below it at every depth.
+	never := Model{S0: 1.0, Rho: 1.0, Q: 0.5}
+	if d := never.AnalyticCrossover(5); d != 0 {
+		t.Errorf("no-crossover analytic: got d*=%d, want 0", d)
+	}
+	if d := never.EmpiricalCrossover(5, 20000, simWorkers, simSeed); d != 0 {
+		t.Errorf("no-crossover empirical: got d*=%d, want 0", d)
+	}
+}
+
+// TestLogUnderflowGuard replicates golden pack A.1: with s0=0.5, rho=0.3 the
+// linear similarity recovery underflows float64 to exactly 0.0 by d=60, while
+// the log-space form stays finite (the reason the paper works in log-space for
+// deep chains).
+func TestLogUnderflowGuard(t *testing.T) {
+	m := Model{S0: 0.5, Rho: 0.3, Q: 0.97}
+	if lin := m.AnalyticPRet(Similarity, 60); lin != 0.0 {
+		t.Errorf("expected float64 underflow to 0.0 at d=60, got %v", lin)
+	}
+	lg := m.LogAnalyticPRet(Similarity, 60)
+	if math.IsInf(lg, 0) || math.IsNaN(lg) {
+		t.Errorf("log form must stay finite at d=60, got %v", lg)
+	}
+	// Consistency at a non-underflowing depth: exp(log P_ret) == P_ret.
+	for d := 1; d <= 5; d++ {
+		mm := PaperCalibration
+		closeTo(t, "exp(log P_sim)", math.Exp(mm.LogAnalyticPRet(Similarity, d)), mm.AnalyticPRet(Similarity, d), 1e-12)
+		closeTo(t, "exp(log P_struct)", math.Exp(mm.LogAnalyticPRet(Structured, d)), mm.AnalyticPRet(Structured, d), 1e-12)
+	}
+}
