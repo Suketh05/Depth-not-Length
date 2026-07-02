@@ -281,3 +281,33 @@ SELECT CASE WHEN ABS((
   SELECT cum_p FROM hop WHERE k = 3
 ) - 0.031027225083967002) <= 1e-12 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 5 -- Structured per-hop recovery and the ~29x depth-3 gap.
+--   Anchors: thm:struct  P_ret^struct(d) = q^d (steady per-hop fidelity q=0.97);
+--   sec:depth "a ~29x gap" between traversal q^3 and similarity s0^3 rho^6.
+-- ---------------------------------------------------------------------------
+-- Golden A.1 (VERBATIM): q^3 = 0.912673; ratio q^3 / P_sim(3) = 29.415231221293272.
+CREATE TABLE _assert_pstruct_d3 (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_pstruct_d3
+SELECT CASE WHEN ABS((
+  WITH RECURSIVE shop(k, cum_q) AS (
+      SELECT 1, 0.97 UNION ALL SELECT k + 1, cum_q * 0.97 FROM shop WHERE k < 3
+  )
+  SELECT cum_q FROM shop WHERE k = 3
+) - 0.912673) <= 1e-12 THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_depth3_gap_ratio (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_depth3_gap_ratio
+SELECT CASE WHEN ABS(
+  (
+    WITH RECURSIVE shop(k, cum_q) AS (
+        SELECT 1, 0.97 UNION ALL SELECT k + 1, cum_q * 0.97 FROM shop WHERE k < 3)
+    SELECT cum_q FROM shop WHERE k = 3
+  ) / (
+    WITH RECURSIVE hop(k, rho_pow, cum_p) AS (
+        SELECT 1, 0.67, 0.70 * 0.67
+      UNION ALL
+        SELECT k + 1, rho_pow * 0.67, cum_p * (0.70 * (rho_pow * 0.67)) FROM hop WHERE k < 3)
+    SELECT cum_p FROM hop WHERE k = 3
+  ) - 29.415231221293272) <= 1e-9 THEN 1 ELSE 0 END;
+
