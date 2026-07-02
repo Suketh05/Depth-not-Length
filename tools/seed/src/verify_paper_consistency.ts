@@ -95,6 +95,12 @@ function runParserSelfTests(): void {
   assertParse(parseCsv("p,q\r\n1,2\r\n"), [["p", "q"], ["1", "2"]], "CRLF line endings");
   // Mirrors the real none-arm row: a trailing blank numeric cell -> "".
   assertParse(parseCsv("none,0.219,0.073,0.052,\n"), [["none", "0.219", "0.073", "0.052", ""]], "blank trailing kappa cell");
+  // A newline inside a quoted field is data, not a row break.
+  assertParse(parseCsv('a,"line1\nline2",c'), [["a", "line1\nline2", "c"]], "newline inside quoted field");
+  // Unquoted whitespace is preserved verbatim (numeric parsers trim on demand).
+  assertParse(parseCsv("a, b ,c"), [["a", " b ", "c"]], "unquoted whitespace preserved");
+  // A blank interior line yields an empty-cell row (dropped later by readCsvTable).
+  assertParse(parseCsv("a\n\nb"), [["a"], [""], ["b"]], "blank interior line");
 }
 
 /** Render the collected identities as an aligned status table. */
