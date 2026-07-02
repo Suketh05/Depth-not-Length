@@ -125,4 +125,75 @@ class RecoveryTest {
                     Recovery.logSimilarityRecovery(d, CAL), TOL, "d=" + d);
         }
     }
+
+    // ---- monotonicity / saturation properties ----
+
+    @Test
+    void similarityRecoveryStrictlyDecreasesInDepth() {
+        // Super-geometric fall-off: P_sim(d+1) < P_sim(d) for the calibration.
+        for (int d = 1; d <= 10; d++) {
+            assertTrue(Recovery.similarityRecovery(d + 1, CAL)
+                    < Recovery.similarityRecovery(d, CAL), "monotone at d=" + d);
+        }
+    }
+
+    @Test
+    void structuredRecoveryStrictlyDecreasesForSubUnitFidelity() {
+        for (int d = 1; d <= 20; d++) {
+            assertTrue(Recovery.structuredRecovery(d + 1, 0.97)
+                    < Recovery.structuredRecovery(d, 0.97), "monotone at d=" + d);
+        }
+    }
+
+    @Test
+    void structuralAdvantageRatioStrictlyGrowsWithDepth() {
+        // P_struct/P_sim -> inf as d -> inf: the ratio must be strictly increasing.
+        double prev = Double.NEGATIVE_INFINITY;
+        for (int d = 1; d <= 8; d++) {
+            double ratio = Recovery.structuredRecovery(d, CAL) / Recovery.similarityRecovery(d, CAL);
+            assertTrue(ratio > prev, "advantage ratio grows at d=" + d);
+            prev = ratio;
+        }
+    }
+
+    @Test
+    void perfectFidelitySaturatesStructuredRecoveryAtOne() {
+        // Chance/saturation floor: q = 1 keeps every-depth structured recovery at 1.0.
+        for (int d = 1; d <= 12; d++) {
+            assertEquals(1.0, Recovery.structuredRecovery(d, 1.0), 0.0, "q=1 at d=" + d);
+        }
+    }
+
+    // ---- domain guards (golden pack cross-cutting note 4) ----
+
+    @Test
+    void depthBelowOneIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> Recovery.similarityRecovery(0, CAL));
+        assertThrows(IllegalArgumentException.class, () -> Recovery.logSimilarityRecovery(0, CAL));
+        assertThrows(IllegalArgumentException.class, () -> Recovery.structuredRecovery(-1, 0.9));
+    }
+
+    @Test
+    void fidelityOutsideUnitIntervalIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> Recovery.structuredRecovery(2, 0.0));
+        assertThrows(IllegalArgumentException.class, () -> Recovery.structuredRecovery(2, 1.5));
+        assertEquals(1.0, Recovery.structuredRecovery(1, 1.0), 0.0); // q = 1 is the closed endpoint
+    }
+
+    @Test
+    void modelRejectsIllegalParameters() {
+        assertThrows(IllegalArgumentException.class, () -> new Recovery.Model(0.0, 0.6, 0.9));
+        assertThrows(IllegalArgumentException.class, () -> new Recovery.Model(0.7, 0.0, 0.9));
+        assertThrows(IllegalArgumentException.class, () -> new Recovery.Model(0.7, 0.6, 0.0));
+        assertThrows(IllegalArgumentException.class, () -> new Recovery.Model(0.7, 0.6, 1.5));
+    }
+
+    @Test
+    void calibrationModelHasThePaperOperatingPoint() {
+        assertEquals(0.70, CAL.s0(), 0.0);
+        assertEquals(0.67, CAL.rho(), 0.0);
+        assertEquals(0.97, CAL.q(), 0.0);
+        assertTrue(CAL.isDecaying());
+        assertFalse(new Recovery.Model(0.7, 1.0, 0.9).isDecaying());
+    }
 }
