@@ -18,4 +18,38 @@ public class TheoryTests
 {
     private static readonly SurvivalModel Calib = Theory.Calibration; // s0=0.70, rho=0.67, q=0.97
     private const double Tol = 1e-12;
+
+    // ---- A.1 similarity recovery (eq:simceiling / Thm thm:sim) ----
+
+    [Fact]
+    public void SimilarityRecoveryMatchesCalibrationTable()
+    {
+        // Golden pack A.1, s0=0.70 rho=0.67, d=1..5 (float64 verbatim).
+        Assert.Equal(0.469, Theory.SimilarityRecovery(1, Calib), Tol);              // 469/1000
+        Assert.Equal(0.14737387000000002, Theory.SimilarityRecovery(2, Calib), Tol); // 14737387/10^8
+        Assert.Equal(0.031027225083967002, Theory.SimilarityRecovery(3, Calib), Tol);
+        Assert.Equal(0.004376633568728781, Theory.SimilarityRecovery(4, Calib), Tol);
+        Assert.Equal(0.0004136302005695817, Theory.SimilarityRecovery(5, Calib), Tol);
+    }
+
+    [Fact]
+    public void SimilarityRecoveryEqualsPerHopProduct()
+    {
+        // Golden pack A.1 test-file identity: P_sim(d) = prod_{i=1..d} s0*rho^i, s0=0.9 rho=0.6.
+        var m = new SurvivalModel(0.9, 0.6, 0.95);
+        double product = 1.0;
+        for (int i = 1; i <= 4; i++)
+            product *= 0.9 * Math.Pow(0.6, i);
+        Assert.Equal(product, Theory.SimilarityRecovery(4, m), Tol);
+    }
+
+    [Fact]
+    public void SimilarityRecoveryUnderflowsButLogStaysFinite()
+    {
+        // Golden pack A.1 underflow guard: s0=0.5, rho=0.3, d=60 underflows to 0.0 in float64,
+        // while the log form remains finite.
+        var m = new SurvivalModel(0.5, 0.3, 0.9);
+        Assert.Equal(0.0, Theory.SimilarityRecovery(60, m));
+        Assert.True(double.IsFinite(Theory.LogSimilarityRecovery(60, m)));
+    }
 }
