@@ -143,3 +143,45 @@ class TestBetaQuantileBinomialTailIdentity:
         lower_tail_at_high = float(stats.binom.cdf(successes, n, res.high))
         assert upper_tail_at_low == pytest.approx(alpha / 2.0, abs=1e-10)
         assert lower_tail_at_high == pytest.approx(alpha / 2.0, abs=1e-10)
+
+
+class TestClopperPearsonProperties:
+    """Structural guarantees the paper leans on, plus input validation."""
+
+    @pytest.mark.parametrize(
+        ("successes", "n"),
+        [(0, 5), (1, 5), (4, 8), (6, 8), (28, 40), (40, 40)],
+    )
+    def test_interval_contains_point_estimate(self, successes: int, n: int) -> None:
+        res = clopper_pearson(successes, n)
+        assert res.low <= res.estimate <= res.high
+        assert 0.0 <= res.low <= res.high <= 1.0  # never leaves the unit interval
+
+    def test_contains_the_wilson_interval_on_the_pooled_kappa_case(self) -> None:
+        # 6/8 is the repo's pooled-kappa Wilson CI case (metrics/factorization):
+        # Wilson 95% = (0.40927543031016883, 0.9285207872478909). Clopper-Pearson
+        # is conservative by construction, so the exact interval must enclose the
+        # score interval here.
+        res = clopper_pearson(6, 8, alpha=0.05)
+        assert res.low < 0.40927543031016883
+        assert res.high > 0.9285207872478909
+
+    def test_narrower_alpha_gives_wider_interval(self) -> None:
+        # Coverage 99% > 95% > 80% must nest.
+        wide = clopper_pearson(28, 40, alpha=0.01)
+        mid = clopper_pearson(28, 40, alpha=0.05)
+        narrow = clopper_pearson(28, 40, alpha=0.20)
+        assert wide.low < mid.low < narrow.low
+        assert narrow.high < mid.high < wide.high
+
+    def test_validation_errors(self) -> None:
+        with pytest.raises(ValueError, match="trials"):
+            clopper_pearson(0, 0)
+        with pytest.raises(ValueError, match="successes"):
+            clopper_pearson(9, 8)
+        with pytest.raises(ValueError, match="successes"):
+            clopper_pearson(-1, 8)
+        with pytest.raises(ValueError, match="alpha"):
+            clopper_pearson(4, 8, alpha=0.0)
+        with pytest.raises(ValueError, match="alpha"):
+            clopper_pearson(4, 8, alpha=1.0)
