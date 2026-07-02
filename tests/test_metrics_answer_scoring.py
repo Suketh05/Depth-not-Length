@@ -12,12 +12,15 @@ import random
 import pytest
 
 from membench.metrics.answer_scoring import (
+    QARecord,
     exact_match,
     fact_f1,
+    llm_judge_accuracy,
     mean_fact_f1,
     normalize_answer,
     split_facts,
     token_f1,
+    token_overlap_judge,
     tokenize_answer,
 )
 
@@ -234,3 +237,75 @@ class TestMeanFactF1:
         # No questions -> no benchmark score; a silent 0 would fabricate one.
         with pytest.raises(ValueError, match="at least one"):
             mean_fact_f1([])
+
+
+def _record(task_id: str, prediction: str, gold: str) -> QARecord:
+    return QARecord(
+        task_id=task_id,
+        question="Where does Ann live?",
+        prediction=prediction,
+        gold=gold,
+    )
+
+
+class TestTokenOverlapJudge:
+    def test_exact_match_passes(self) -> None:
+        assert token_overlap_judge("q", "The Eiffel Tower", "eiffel tower")
+
+    def test_disjoint_fails(self) -> None:
+        assert not token_overlap_judge("q", "blue bike", "red car")
+
+    def test_boundary_is_inclusive(self) -> None:
+        # F1 = 2*1/(2+2) = 1/2 sits exactly on the default 0.5 threshold -> pass.
+        assert token_overlap_judge("q", "blue car", "red car")
+
+    def test_threshold_is_tunable(self) -> None:
+        # Same 1/2-F1 pair fails a stricter threshold.
+        assert not token_overlap_judge("q", "blue car", "red car", threshold=0.6)
+
+    def test_question_does_not_change_verdict(self) -> None:
+        # Deterministic fallback ignores the question by construction.
+        assert token_overlap_judge("q1", "lyon", "Lyon") == token_overlap_judge(
+            "q2", "lyon", "Lyon"
+        )
+
+
+class TestLLMJudgeAccuracy:
+    def test_golden_three_of_four(self) -> None:
+        # Default fallback judge: verdicts (T, T, T, F) -> accuracy = 3/4 exactly.
+        records = [
+            _record("t1", "Lyon", "lyon"),  # exact match -> T
+            _record("t2", "in Lyon, France", "Lyon France"),  # overlap 2: F1 = 2*2/(3+2) = 4/5 -> T
+            _record("t3", "blue car", "red car"),  # F1 = 1/2 boundary -> T
+            _record("t4", "no idea", "Lyon"),  # overlap 0 -> F
+        ]
+        result = llm_judge_accuracy(records)
+        assert result.verdicts == (True, True, True, False)
+        assert result.correct == 3
+        assert result.total == 4
+        assert result.accuracy == 3 / 4  # exact fraction
+
+    def test_custom_judge_hook_receives_armblind_triple(self) -> None:
+        # The hook sees exactly (question, prediction, gold) -- nothing else
+        # exists to leak arm identity (paper sec:grader arm-blind protocol).
+        seen: list[tuple[str, str, str]] = []
+
+        def spy_judge(question: str, prediction: str, gold: str) -> bool:
+            seen.append((question, prediction, gold))
+            return prediction == gold
+
+        records = [_record("t1", "a", "a"), _record("t2", "b", "c")]
+        result = llm_judge_accuracy(records, judge=spy_judge)
+        assert seen == [("Where does Ann live?", "a", "a"), ("Where does Ann live?", "b", "c")]
+        assert result.verdicts == (True, False)
+        assert result.accuracy == 1 / 2
+
+    def test_all_correct_and_all_wrong_extremes(self) -> None:
+        perfect = llm_judge_accuracy([_record("t", "x", "x")])
+        assert perfect.accuracy == 1.0
+        hopeless = llm_judge_accuracy([_record("t", "x", "y")], judge=lambda q, p, g: False)
+        assert hopeless.accuracy == 0.0
+
+    def test_empty_run_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            llm_judge_accuracy([])
