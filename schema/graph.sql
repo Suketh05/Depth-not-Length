@@ -369,3 +369,16 @@ SELECT CASE WHEN
   ) = 's-sess-3'
   THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 8 -- Supersession chain length: n versions => n-1 supersedes edges.
+--   Anchor: golden A.7 edge_hops(n) = n - 1 (theory/supersession.py). n=3 => 2.
+-- ---------------------------------------------------------------------------
+CREATE TABLE _assert_super_edge_hops (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_super_edge_hops
+SELECT CASE WHEN (
+  SELECT COUNT(*) FROM entity_link
+  WHERE relationship_type = 'supersedes'
+    AND source_entity_object_id IN ('s-sess-1', 's-sess-2', 's-sess-3')
+    AND target_entity_object_id IN ('s-sess-1', 's-sess-2', 's-sess-3')
+) = 2 THEN 1 ELSE 0 END;
+
