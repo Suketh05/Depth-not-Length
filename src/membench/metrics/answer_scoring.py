@@ -46,15 +46,21 @@ import string
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 __all__ = [
+    "AnswerJudge",
     "F1Result",
+    "JudgeAccuracy",
+    "QARecord",
     "exact_match",
     "fact_f1",
+    "llm_judge_accuracy",
     "mean_fact_f1",
     "normalize_answer",
     "split_facts",
     "token_f1",
+    "token_overlap_judge",
     "tokenize_answer",
 ]
 
@@ -111,7 +117,7 @@ def tokenize_answer(text: str) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class F1Result:
-    """Precision / recall / F1 with the integer overlap counts that produced them.
+    r"""Precision / recall / F1 with the integer overlap counts that produced them.
 
     The counts are retained so every ratio is auditable: ``precision =
     overlap / n_predicted``, ``recall = overlap / n_gold`` and, by the
@@ -119,8 +125,8 @@ class F1Result:
 
     .. math::
 
-        F_1 = \\frac{2PR}{P + R} = \\frac{2 \\cdot \\text{overlap}}
-              {n_\\text{predicted} + n_\\text{gold}},
+        F_1 = \frac{2PR}{P + R}
+            = \frac{2 \cdot \text{overlap}}{n_\text{predicted} + n_\text{gold}},
 
     which is how :attr:`f1` is computed -- one exact integer division, no
     intermediate float rounding, so tiny hand-computed goldens are exact
@@ -321,3 +327,142 @@ def mean_fact_f1(results: Sequence[F1Result]) -> float:
     if not results:
         raise ValueError("mean_fact_f1 needs at least one per-question result")
     return sum(result.f1 for result in results) / len(results)
+
+
+@dataclass(frozen=True, slots=True)
+class QARecord:
+    """One question / model answer / gold answer triple to be judged.
+
+    The record deliberately carries **no arm, model, or system identity**:
+    the paper's judging protocol is arm-blind (``sec:grader``: the judge
+    "sees the known invariant as reference but not the arm identity";
+    threats to that blindness are analyzed in ``sec:gradervalidity``). Keeping
+    identity out of the record type makes un-blinding a type error rather
+    than a prompt-engineering mistake.
+    """
+
+    task_id: str
+    question: str
+    prediction: str
+    gold: str
+
+
+class AnswerJudge(Protocol):
+    """Judge hook: one binary verdict per (question, prediction, gold) triple.
+
+    Implementations receive exactly the arm-blind triple -- for live LoCoMo
+    grading this is an LLM *distinct from the answer models* (paper
+    ``sec:grader``) prompted with the question, the candidate answer, and the
+    gold reference; offline it is :func:`token_overlap_judge`. The judge
+    returns ``True`` iff the prediction answers the question correctly with
+    respect to the gold reference.
+    """
+
+    def __call__(self, question: str, prediction: str, gold: str) -> bool:
+        """Return the correctness verdict for one answer."""
+        ...
+
+
+#: Default verdict threshold for :func:`token_overlap_judge`. F1 >= 0.5 is the
+#: balanced operating point: at least half the harmonic token mass is shared
+#: (e.g. 1 shared token of 2-vs-2 sits exactly on the boundary and passes).
+DEFAULT_JUDGE_THRESHOLD = 0.5
+
+
+def token_overlap_judge(
+    question: str,  # part of the AnswerJudge signature; unused by the deterministic verdict
+    prediction: str,
+    gold: str,
+    *,
+    threshold: float = DEFAULT_JUDGE_THRESHOLD,
+) -> bool:
+    """Deterministic fallback judge: correct iff token F1 clears a threshold.
+
+    Verdict = ``token_f1(prediction, gold).f1 >= threshold`` (exact match
+    therefore always passes: F1 = 1.0). The question text is accepted to
+    satisfy the :class:`AnswerJudge` protocol but ignored -- token overlap
+    against gold is question-independent. This keeps the offline pipeline
+    reproducible, exactly as the identifier scorer does for compliance
+    (:mod:`membench.metrics.compliance`); a live LLM judge replaces it for
+    the paper's LoCoMo runs.
+
+    Parameters
+    ----------
+    question
+        The question (ignored; protocol compatibility only).
+    prediction
+        Model answer text.
+    gold
+        Gold answer text.
+    threshold
+        Minimum token F1 to count as correct; boundary inclusive.
+
+    Returns
+    -------
+    bool
+        ``True`` iff F1 >= ``threshold``.
+    """
+    return token_f1(prediction, gold).f1 >= threshold
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeAccuracy:
+    """Aggregate LLM-judge accuracy with its per-task verdicts.
+
+    ``accuracy = correct / total`` is the "LoCoMo LLM-judge acc." statistic
+    of ``tab:stdbench`` (reported there in percent). Per-task verdicts are
+    kept so failures can be inspected and so downstream inference (paired
+    tests over arms) operates on events, not on the pooled rate.
+    """
+
+    correct: int
+    total: int
+    accuracy: float
+    verdicts: tuple[bool, ...]
+
+
+def llm_judge_accuracy(
+    records: Sequence[QARecord],
+    judge: AnswerJudge | None = None,
+) -> JudgeAccuracy:
+    """Score a QA benchmark run with a (pluggable) judge: LoCoMo protocol.
+
+    Implements the accuracy statistic of the paper's ``tab:stdbench`` LoCoMo
+    row (Brief 87.6 vs. RAPTOR 84.7, cited for provenance -- not asserted
+    here): every question receives one binary verdict from the judge; the
+    benchmark score is the fraction of correct verdicts. The judge sees only
+    the arm-blind (question, prediction, gold) triple per :class:`QARecord`.
+
+    Parameters
+    ----------
+    records
+        The per-question records of one system's run.
+    judge
+        Verdict hook; defaults to the deterministic
+        :func:`token_overlap_judge` so offline runs are reproducible.
+
+    Returns
+    -------
+    JudgeAccuracy
+        Correct count, total, accuracy in ``[0, 1]``, per-task verdicts in
+        record order.
+
+    Raises
+    ------
+    ValueError
+        If ``records`` is empty -- no questions means no accuracy, and a
+        silent 0 (or 1) would fabricate a benchmark number.
+    """
+    if not records:
+        raise ValueError("llm_judge_accuracy needs at least one record")
+    active_judge: AnswerJudge = judge if judge is not None else token_overlap_judge
+    verdicts = tuple(
+        active_judge(record.question, record.prediction, record.gold) for record in records
+    )
+    correct = sum(verdicts)
+    return JudgeAccuracy(
+        correct=correct,
+        total=len(verdicts),
+        accuracy=correct / len(verdicts),
+        verdicts=verdicts,
+    )
