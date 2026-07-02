@@ -21,6 +21,7 @@ import math
 import numpy as np
 import pytest
 
+from membench.metrics.factorization import wilson_interval as py_wilson_interval
 from membench.retrieval._native import cosine_topk_reference
 from membench.retrieval.bm25_plus import bm25_plus_scores as py_bm25_plus_scores
 from membench.retrieval.rank_fusion_graph import reciprocal_rank_fusion as py_rrf
@@ -207,3 +208,31 @@ def test_rust_rrf_matches_python_across_k(k: int) -> None:
     got = dict(zip(ids, scores, strict=True))
     for key, value in ref.items():
         assert got[key] == pytest.approx(value, abs=1e-12, rel=0)
+
+
+# ---------------------------------------------------------------------------
+# verify.rs parity: Wilson interval (factorization.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("successes", "trials", "confidence"),
+    [
+        (8.0, 10.0, 0.95),
+        (6.0, 8.0, 0.95),
+        (0.0, 10.0, 0.95),
+        (10.0, 10.0, 0.95),
+        (344.0, 604.0, 0.95),  # tab:realret bm25 pooled counts scale
+        (5.5, 12.0, 0.90),
+        (30.0, 100.0, 0.99),
+    ],
+)
+def test_rust_wilson_interval_matches_python(
+    successes: float, trials: float, confidence: float
+) -> None:
+    import membench_kernels
+
+    ref_low, ref_high = py_wilson_interval(successes, trials, confidence=confidence)
+    low, high = membench_kernels.wilson_interval(successes, trials, confidence)
+    assert low == pytest.approx(ref_low, abs=1e-12, rel=0)
+    assert high == pytest.approx(ref_high, abs=1e-12, rel=0)
