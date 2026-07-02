@@ -165,3 +165,41 @@ INSERT INTO entity_link (id, source_entity_object_id, target_entity_object_id, r
   ('e-sup-1', 's-sess-2', 's-sess-1', 'supersedes', 'confirmed', 1.0, 'explicit'),
   ('e-sup-2', 's-sess-3', 's-sess-2', 'supersedes', 'confirmed', 1.0, 'explicit');
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 1 -- Bounded traversal recovers the governing decision at EXACTLY 3 hops.
+--   Anchors: eq:perhop (P_ret = product of per-hop survival), thm:struct
+--   (structured recovery reaches depth-d at steady cost), sec:struct.
+-- ---------------------------------------------------------------------------
+-- Recursive CTE = the traverseEntityGraph walk from the roots-digest template,
+-- carrying hop depth. min_confidence >= 0.5 filters the spurious 0.20 trap edge,
+-- so the shortest confidence-gated path to d-gov-3 is the true causal depth 3.
+CREATE TABLE _assert_depth3_reach (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_depth3_reach
+SELECT CASE WHEN (
+  WITH RECURSIVE walk(node, depth) AS (
+      SELECT 'q-task', 0
+    UNION
+      SELECT e.target_entity_object_id, walk.depth + 1
+      FROM walk
+      JOIN entity_link e ON e.source_entity_object_id = walk.node
+      WHERE walk.depth < 3 AND e.confidence >= 0.5
+  )
+  SELECT MIN(depth) FROM walk WHERE node = 'd-gov-3'
+) = 3 THEN 1 ELSE 0 END;
+
+-- Companion: the SAME walk WITHOUT the confidence gate (>= 0.0) lets the 0.20
+-- similarity trap edge fake a 1-hop shortcut -- proving the gate is load-bearing.
+CREATE TABLE _assert_trap_shortcut_is_1hop (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_trap_shortcut_is_1hop
+SELECT CASE WHEN (
+  WITH RECURSIVE walk(node, depth) AS (
+      SELECT 'q-task', 0
+    UNION
+      SELECT e.target_entity_object_id, walk.depth + 1
+      FROM walk
+      JOIN entity_link e ON e.source_entity_object_id = walk.node
+      WHERE walk.depth < 3 AND e.confidence >= 0.0
+  )
+  SELECT MIN(depth) FROM walk WHERE node = 'd-gov-3'
+) = 1 THEN 1 ELSE 0 END;
+
