@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from membench.agents.llm.base import LLMResponse
+from membench.agents.llm.pricing import session_blended_cost
 
 __all__ = [
     "Session",
@@ -223,3 +224,23 @@ class Session:
             running += turn.total_tokens
             totals.append(running)
         return tuple(totals)
+
+    def blended_cost_dollars(self, model: str | None = None) -> float:
+        """Return the session's blended-rate dollar cost (paper ``USD`` column).
+
+        Uses :func:`membench.agents.llm.pricing.session_blended_cost` at the
+        session's total token count. ``model`` defaults to this session's
+        :attr:`model`; pass it explicitly to price the same token ledger under a
+        different backend (e.g. the ``tab:tok_agent_economics`` gpt-4o rate).
+
+        Raises
+        ------
+        KeyError
+            If the model has no blended session rate.
+        """
+        return session_blended_cost(model or self.model, self.session_tokens)
+
+    def cumulative_dollars(self, model: str | None = None) -> tuple[float, ...]:
+        """Return the blended-rate dollar cost accrued after each turn (monotone)."""
+        priced = model or self.model
+        return tuple(session_blended_cost(priced, tokens) for tokens in self.cumulative_tokens())
