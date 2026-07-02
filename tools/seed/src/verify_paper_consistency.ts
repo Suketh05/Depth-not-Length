@@ -163,6 +163,46 @@ function checkKappaRoundTrip(): CheckResult[] {
 const IDENTITY_TOL = 1e-9; // integer/decimal identities carry only float dust
 
 // ---------------------------------------------------------------------------
+// Identity B.1b — tab:realret structural claims stated in its caption/headline:
+// the table is sorted by recall (non-increasing), and Brief's recall leads
+// dense by exactly 0.032 ("Brief recall 0.032 above dense", sec:realret).
+// ---------------------------------------------------------------------------
+
+function checkRealcodeStructure(): CheckResult[] {
+  const rows = loadRealcodePooled();
+  const results: CheckResult[] = [];
+  let sorted = true;
+  for (let i = 1; i < rows.length; i += 1) {
+    if (rows[i]!.recall > rows[i - 1]!.recall + IDENTITY_TOL) {
+      sorted = false;
+    }
+  }
+  results.push({
+    identity: "tab:realret rows sorted by recall (non-increasing)",
+    sourceFile: "paper_realcode_pooled.csv",
+    paperLabel: "tab:realret (caption)",
+    expected: "true",
+    actual: String(sorted),
+    ok: sorted,
+  });
+  const brief = rows.find((r) => r.arm === "brief");
+  const dense = rows.find((r) => r.arm === "dense");
+  if (brief === undefined || dense === undefined) {
+    throw new Error("paper_realcode_pooled.csv missing brief or dense arm");
+  }
+  const lead = brief.recall - dense.recall;
+  results.push({
+    identity: `brief recall - dense recall = ${brief.recall} - ${dense.recall}`,
+    sourceFile: "paper_realcode_pooled.csv",
+    paperLabel: "sec:realret (headline)",
+    expected: "0.032",
+    actual: fmt(lead),
+    ok: approxEqual(lead, 0.032, IDENTITY_TOL),
+  });
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // Identity B.2 — session-token win rate (tab:tok_context_winrate).
 // 2880 / 3600 = 0.800; won + lost + tied = total with 0 ties.
 // ---------------------------------------------------------------------------
@@ -337,6 +377,7 @@ function checkDepthSlope(): CheckResult[] {
 function runAllChecks(): CheckResult[] {
   return [
     ...checkKappaRoundTrip(),
+    ...checkRealcodeStructure(),
     ...checkTokenWinRate(),
     ...checkScorecard(),
     ...checkSyntheticOrdering(),
