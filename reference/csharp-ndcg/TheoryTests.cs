@@ -52,4 +52,53 @@ public class TheoryTests
         Assert.Equal(0.0, Theory.SimilarityRecovery(60, m));
         Assert.True(double.IsFinite(Theory.LogSimilarityRecovery(60, m)));
     }
+
+    // ---- A.2 structured recovery (Thm thm:struct) ----
+
+    [Fact]
+    public void StructuredRecoveryMatchesCalibrationTable()
+    {
+        // Golden pack A.1/A.2, q=0.97, d=1..5 (float64 verbatim).
+        Assert.Equal(0.97, Theory.StructuredRecovery(1, 0.97), Tol);
+        Assert.Equal(0.9409, Theory.StructuredRecovery(2, 0.97), Tol);
+        Assert.Equal(0.912673, Theory.StructuredRecovery(3, 0.97), Tol);
+        Assert.Equal(0.8852928099999999, Theory.StructuredRecovery(4, 0.97), Tol);
+        Assert.Equal(0.8587340256999999, Theory.StructuredRecovery(5, 0.97), Tol);
+    }
+
+    [Fact]
+    public void StructuredRecoveryEqualsPowerLaw()
+    {
+        // Golden pack A.1 test-file: structured_recovery(5, 0.95) == 0.95**5.
+        Assert.Equal(Math.Pow(0.95, 5), Theory.StructuredRecovery(5, 0.95), Tol);
+        Assert.Equal(1.0, Theory.StructuredRecovery(3, 1.0), Tol); // q=1 boundary: certain traversal
+    }
+
+    // ---- A.3 gap, overhead, and crossover (eq:gd / Prop prop:cross) ----
+
+    [Fact]
+    public void GapMatchesCalibrationTable()
+    {
+        // Golden pack A.1/A.3, g(d)=q^d - P_sim(d) at the calibration, d=1..5 (float64 verbatim).
+        Assert.Equal(0.501, Theory.Gap(1, Calib), Tol);
+        Assert.Equal(0.7935261299999999, Theory.Gap(2, Calib), Tol);
+        Assert.Equal(0.8816457749160329, Theory.Gap(3, Calib), Tol);
+        Assert.Equal(0.8809161764312712, Theory.Gap(4, Calib), Tol);
+        Assert.Equal(0.8583203954994303, Theory.Gap(5, Calib), Tol);
+    }
+
+    [Fact]
+    public void DepthThreeStructuredVsSimilarityIsAbout29x()
+    {
+        // Paper §sec:depth "~29x gap" at d=3: q^3 / P_sim(3) = 29.415231221293272.
+        double ratio = Theory.StructuredRecovery(3, Calib.Q) / Theory.SimilarityRecovery(3, Calib);
+        Assert.Equal(29.415231221293272, ratio, 1e-9);
+    }
+
+    [Fact]
+    public void OverheadRatioGolden()
+    {
+        // Golden pack A.3: overhead_ratio(2.0, 8.0) = 0.25.
+        Assert.Equal(0.25, Theory.OverheadRatio(2.0, 8.0), Tol);
+    }
 }
