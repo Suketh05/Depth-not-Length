@@ -312,3 +312,32 @@ assert_close(gap(2),   0.7935261299999999,  1e-12, "theory:g(2) full precision")
 assert_close(gap(1),   0.501,               1e-12, "theory:g(1)=0.501")
 cat(sprintf("PASS (6) theory gap: g(1)=%.3f g(2)=%.8f (structure wins, prop:cross)\n",
             gap(1), gap(2)))
+
+## ---------------------------------------------------------------------------
+## (7) Edge cases: chance floors, saturation, empty inputs
+##     Boundary behaviour of the estimators above -- the corners where a naive
+##     port silently produces NaN/Inf. Deterministic (no RNG); pure closed form.
+## ---------------------------------------------------------------------------
+# DL homogeneity floor: identical effects => Q=0 => tau^2=0, I^2=0, and the
+# pooled estimate collapses to the inverse-variance mean (here exactly 0.2).
+dl_hom <- dersimonian_laird(c(0.2, 0.2, 0.2), c(0.02, 0.03, 0.05))
+assert_close(dl_hom$Q,      0.0, 1e-12, "edge:DL homogeneous Q=0")
+assert_close(dl_hom$tau2,   0.0, 1e-12, "edge:DL tau2 floored to 0")
+assert_close(dl_hom$I2,     0.0, 1e-12, "edge:DL I2 floored to 0")
+assert_close(dl_hom$pooled, 0.2, 1e-12, "edge:DL pooled=0.2 (no NaN)")
+# Wilson saturation/floor: proportion 1 clamps high to 1; proportion 0 clamps low to 0.
+assert_close(wilson_interval(10, 10)$high, 1.0, 1e-12, "edge:Wilson p=1 high clamps to 1")
+assert_close(wilson_interval(0, 10)$low,   0.0, 1e-12, "edge:Wilson p=0 low clamps to 0")
+# Cohen's h saturation: perfect separation h(1,0)=pi; chance contrast h(0.5,0.5)=0.
+assert_close(cohen_h(1.0, 0.0), pi, 1e-12, "edge:Cohen h(1,0)=pi (max)")
+assert_close(cohen_h(0.5, 0.5), 0.0, 1e-12, "edge:Cohen h chance floor=0")
+# PAVA on an already-isotonic sequence is identity; single point is a fixed
+# point; empty input yields an empty fit (no crash).
+assert_true(pava_increasing(c(1, 2, 3)) == c(1, 2, 3), "edge:PAVA isotonic identity")
+assert_true(pava_increasing(c(5)) == c(5), "edge:PAVA single fixed point")
+assert_true(length(pava_increasing(numeric(0))) == 0L, "edge:PAVA empty->empty")
+# TOST equivalent verdict: coincident means with a wide margin reject both
+# one-sided tails => p_value < alpha => equivalent (the opposite verdict to (2)).
+tost_eq <- tost_two_means(10.0, 1.0, 50, 10.0, 1.0, 50, delta = 1.0)
+assert_true(tost_eq$p_value < 0.05, "edge:TOST equivalent verdict")
+cat("PASS (7) edge cases: DL/Wilson/Cohen/PAVA/TOST boundaries (floors, saturation, empty)\n")
