@@ -413,3 +413,36 @@ SELECT CASE WHEN (
   ) > 0
 ) = 16 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 10 -- Fairness-lock: value-domain CHECKs and the edge-uniqueness lock.
+--   Anchor: sec:fairness (confidence bounded [0,1]; edge status/kind domains
+--   fixed; each (source,target,type) counted at most once -- no double-counting).
+-- ---------------------------------------------------------------------------
+CREATE TABLE _assert_confidence_bounded (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_confidence_bounded
+SELECT CASE WHEN instr(
+  (SELECT sql FROM sqlite_master WHERE name = 'entity_link'),
+  'CHECK (confidence BETWEEN 0.0 AND 1.0)'
+) > 0 THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_status_domain (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_status_domain
+SELECT CASE WHEN instr(
+  (SELECT sql FROM sqlite_master WHERE name = 'entity_link'),
+  'CHECK (status IN (''inferred'', ''confirmed'', ''archived'', ''rejected''))'
+) > 0 THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_kind_domain (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_kind_domain
+SELECT CASE WHEN instr(
+  (SELECT sql FROM sqlite_master WHERE name = 'entity_objects'),
+  'CHECK (kind IN (''source'', ''synthesis''))'
+) > 0 THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_edge_unique_lock (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_edge_unique_lock
+SELECT CASE WHEN instr(
+  (SELECT sql FROM sqlite_master WHERE name = 'entity_link'),
+  'UNIQUE (source_entity_object_id, target_entity_object_id, relationship_type)'
+) > 0 THEN 1 ELSE 0 END;
+
