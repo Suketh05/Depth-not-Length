@@ -21,8 +21,13 @@ from membench.agents.llm.pricing import (
 )
 from membench.agents.session import (
     PaperLedgerRow,
+    Session,
+    TurnRecord,
+    collapse_turns,
     competitor_saving_pct,
+    ledger_rows,
     matchup_winner,
+    paper_ledger_row,
     tokens_per_resolved_point,
     win_rate,
 )
@@ -360,3 +365,126 @@ class TestParetoGoldens:
         field = [row[3] for row in PARETO_ROWS[1:]]
         assert all(0.11 <= round(value, 2) <= 0.19 for value in field)
         assert all(3.0 < brief / value < 6.2 for value in field)
+
+
+# ---------------------------------------------------------------------------
+# Constructed-session ledger arithmetic and validation edge cases.
+# ---------------------------------------------------------------------------
+
+
+def _session(turn_specs: list[tuple[int, int, float, bool]], max_turns: int = 8) -> Session:
+    """Build a Session from (prompt, completion, dollars, resolved) tuples."""
+    turns = tuple(
+        TurnRecord(
+            turn=i,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            dollars=dollars,
+            response_text=f"turn {i}",
+            resolved=resolved,
+        )
+        for i, (prompt, completion, dollars, resolved) in enumerate(turn_specs, start=1)
+    )
+    return Session(
+        task_id="t1", dataset="synthetic", arm="brief_graph", model="stub",
+        turns=turns, max_turns=max_turns,
+    )
+
+
+class TestSessionLedgerArithmetic:
+    def test_hand_computed_cumulative_ledger(self) -> None:
+        # Dollars chosen dyadic (0.25, 0.125, 0.0625) so every sum is exact:
+        # tokens 1000+200, 300+50, 40+10 -> turn totals 1200, 350, 50;
+        # cumulative tokens 1200, 1550, 1600; cumulative dollars 0.25, 0.375,
+        # 0.4375. (Shape mirrors the Brief-context collapse row: turn 1 heavy,
+        # then confirmation turns.)
+        session = _session([(1000, 200, 0.25, False), (300, 50, 0.125, False), (40, 10, 0.0625, True)])
+        assert session.session_tokens == 1600
+        assert session.prompt_tokens == 1340
+        assert session.completion_tokens == 260
+        assert session.session_dollars == 0.4375
+        rows = ledger_rows(session)
+        assert [row["turn_tokens"] for row in rows] == [1200, 350, 50]
+        assert [row["cumulative_tokens"] for row in rows] == [1200, 1550, 1600]
+        assert [row["cumulative_dollars"] for row in rows] == [0.25, 0.375, 0.4375]
+        assert rows[-1]["cumulative_tokens"] == session.session_tokens
+        assert rows[-1]["cumulative_dollars"] == session.session_dollars
+        assert [row["resolved"] for row in rows] == [False, False, True]
+
+    def test_convergence_turn_is_final_resolved_turn(self) -> None:
+        session = _session([(100, 10, 0.1, False), (50, 5, 0.05, True)])
+        assert session.resolved is True
+        assert session.convergence_turn == 2
+        assert session.n_turns == 2
+
+    def test_unresolved_session_has_no_convergence_turn(self) -> None:
+        session = _session([(100, 10, 0.1, False), (100, 10, 0.1, False)])
+        assert session.resolved is False
+        assert session.convergence_turn is None
+
+    def test_empty_session_is_the_vacuous_ledger(self) -> None:
+        session = _session([])
+        assert session.n_turns == 0
+        assert session.session_tokens == 0
+        assert session.session_dollars == 0.0
+        assert session.convergence_turn is None
+        assert ledger_rows(session) == []
+        row = paper_ledger_row(session)
+        assert (row.turn1, row.turn2, row.turn3, row.turn4_plus) == (None, None, None, None)
+        assert row.session_tokens == 0
+
+    def test_paper_row_collapse_of_a_six_turn_session(self) -> None:
+        # Six turns of 100 tokens each: T4+ pools turns 4..6 = 300; the paper's
+        # own "alone ... 6 turns" row pools its turns 4..6 into 1461 the same way.
+        per_turn = [(80, 20, 0.1, False)] * 5 + [(80, 20, 0.1, True)]
+        row = paper_ledger_row(_session(per_turn))
+        assert (row.turn1, row.turn2, row.turn3) == (100, 100, 100)
+        assert row.turn4_plus == 300
+        assert row.session_tokens == 600
+
+    def test_collapse_turns_short_sessions(self) -> None:
+        one = collapse_turns([1598])
+        assert (one.turn1, one.turn2, one.turn3, one.turn4_plus) == (1598, None, None, None)
+        two = collapse_turns([1598, 203])
+        assert (two.turn2, two.turn3, two.turn4_plus) == (203, None, None)
+        assert two.session_tokens == 1801
+
+    def test_ledger_row_sum_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="does not sum"):
+            PaperLedgerRow(1403, 698, 601, 1461, 4164)  # off by one
+
+
+class TestSessionValidation:
+    def test_resolution_before_final_turn_rejected(self) -> None:
+        # Stop-at-first-resolution is structural: a resolved turn cannot be
+        # followed by more turns.
+        with pytest.raises(ValueError, match="first resolved turn"):
+            _session([(100, 10, 0.1, True), (50, 5, 0.05, False)])
+
+    def test_non_contiguous_turn_numbering_rejected(self) -> None:
+        turns = (
+            TurnRecord(turn=1, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text="a"),
+            TurnRecord(turn=3, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text="b"),
+        )
+        with pytest.raises(ValueError, match="contiguously"):
+            Session(task_id="t", dataset="d", arm="a", model="m", turns=turns, max_turns=8)
+
+    def test_more_turns_than_cap_rejected(self) -> None:
+        with pytest.raises(ValueError, match="max_turns"):
+            _session([(1, 1, 0.0, False), (1, 1, 0.0, False)], max_turns=1)
+
+    def test_turn_record_domain(self) -> None:
+        with pytest.raises(ValueError, match="turn must be >= 1"):
+            TurnRecord(turn=0, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text="")
+        with pytest.raises(ValueError, match="non-negative"):
+            TurnRecord(turn=1, prompt_tokens=-1, completion_tokens=1, dollars=0.0, response_text="")
+        with pytest.raises(ValueError, match="non-negative"):
+            TurnRecord(turn=1, prompt_tokens=1, completion_tokens=1, dollars=-0.1, response_text="")
+        with pytest.raises(ValueError, match="non-negative"):
+            collapse_turns([100, -1])
+
+    def test_tokens_per_resolved_point_domain(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            tokens_per_resolved_point(1000, 0.0)
+        with pytest.raises(ValueError, match="non-negative"):
+            tokens_per_resolved_point(-1, 10.0)
