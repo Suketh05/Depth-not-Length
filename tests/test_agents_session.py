@@ -21,6 +21,7 @@ from membench.agents.llm.pricing import (
 )
 from membench.agents.session import (
     PaperLedgerRow,
+    competitor_saving_pct,
     matchup_winner,
     tokens_per_resolved_point,
     win_rate,
@@ -266,3 +267,96 @@ class TestWinRateGoldens:
             win_rate(1, 0)
         with pytest.raises(ValueError, match="wins"):
             win_rate(361, 360)
+
+
+# ---------------------------------------------------------------------------
+# tab:tok_context_brief_losses — "Honest token losses (compact sample)".
+# Rows: LLM, task, cheaper layer, Brief tokens, competitor tokens, printed
+# "Comp. saves %". All numbers verbatim from the paper table.
+# ---------------------------------------------------------------------------
+LOSS_SAMPLE_ROWS: list[tuple[str, str, str, int, int, float]] = [
+    ("GPT-5.3 Codex", "swe-004", "none", 1938, 1593, 17.8),
+    ("Claude Opus 4.8", "swe-009", "Mem0", 2428, 1995, 17.8),
+    ("Mistral Large 3", "swe-004", "Zep", 2105, 1732, 17.7),
+    ("Gemini 3.5 Flash", "swe-003", "Zep", 1433, 1181, 17.6),
+    ("Composer 2.5", "swe-005", "Kluris", 1760, 1451, 17.6),
+    ("Kimi K2.5", "swe-019", "Driver", 1987, 1640, 17.5),
+]
+
+# tab:tok_pareto — "Compliance vs. token spend (swebench swe3)". Rows: system,
+# compliance, tokens, printed compliance per 1k tokens, printed dp. Verbatim.
+PARETO_ROWS: list[tuple[str, float, int, float, int]] = [
+    ("Brief", 0.748, 1100, 0.68, 2),
+    ("Mem0", 0.533, 2993, 0.1781, 4),
+    ("Zep", 0.5, 2959, 0.169, 3),
+    ("Supermemory", 0.456, 3018, 0.1511, 4),
+    ("MemGPT", 0.471, 3016, 0.1562, 4),
+    ("GraphRAG", 0.449, 3181, 0.1412, 4),
+    ("A-Mem", 0.506, 2947, 0.1717, 4),
+    ("RAPTOR", 0.414, 3099, 0.1336, 4),
+    ("ContextQ", 0.547, 2847, 0.1921, 4),
+    ("Unabyss", 0.454, 3173, 0.1431, 4),
+    ("ctx|", 0.501, 3052, 0.1642, 4),
+    ("Driver", 0.472, 3085, 0.153, 3),
+    ("Oiya", 0.416, 3217, 0.1293, 4),
+    ("Kluris", 0.376, 3378, 0.1113, 4),
+    ("Oracle Summary", 0.512, 2920, 0.1753, 4),
+    ("OpenViking", 0.464, 3085, 0.1504, 4),
+]
+
+
+class TestHonestLossGoldens:
+    """The loss-sample margins of tab:tok_context_brief_losses, recomputed."""
+
+    @pytest.mark.parametrize(
+        ("llm", "task", "layer", "brief_tok", "comp_tok", "saves_pct"), LOSS_SAMPLE_ROWS
+    )
+    def test_competitor_saving_percentages(
+        self, llm: str, task: str, layer: str, brief_tok: int, comp_tok: int, saves_pct: float
+    ) -> None:
+        # "Comp. saves %" = 100 * (Brief - competitor) / Brief, printed at 1 dp.
+        # E.g. first row: 100 * (1938 - 1593) / 1938 = 17.80... -> 17.8. The
+        # paper reads the whole column as "around 17--18%".
+        computed = competitor_saving_pct(brief_tok, comp_tok)
+        assert round(computed, 1) == saves_pct
+        assert 17.0 <= computed <= 18.0
+
+    def test_every_sampled_loss_is_a_real_loss(self) -> None:
+        # In each sampled row the competitor is strictly cheaper — these are
+        # losses on token cost, "not a difference in outcome" (both resolve).
+        for _llm, _task, _layer, brief_tok, comp_tok, _pct in LOSS_SAMPLE_ROWS:
+            assert matchup_winner(brief_tok, comp_tok) == "competitor"
+
+    def test_loss_count_matches_headline(self) -> None:
+        # 6 sampled rows "+ 714 more loss rows" = the headline 720 losses.
+        assert len(LOSS_SAMPLE_ROWS) + 714 == 720
+
+    def test_saving_pct_domain(self) -> None:
+        assert competitor_saving_pct(200, 100) == 50.0  # exact: 100*(200-100)/200
+        assert competitor_saving_pct(100, 150) == -50.0  # Brief cheaper -> negative
+        with pytest.raises(ValueError, match="positive"):
+            competitor_saving_pct(0, 10)
+
+
+class TestParetoGoldens:
+    """tab:tok_pareto's compliance-per-1k-token column, recomputed per row."""
+
+    @pytest.mark.parametrize(
+        ("system", "compliance", "tokens", "per_1k", "dp"), PARETO_ROWS
+    )
+    def test_compliance_per_1k_tokens(
+        self, system: str, compliance: float, tokens: int, per_1k: float, dp: int
+    ) -> None:
+        # Compliance / 1k tok = 1000 * compliance / tokens at printed precision.
+        # E.g. Brief: 1000 * 0.748 / 1100 = 0.68 exactly; Mem0:
+        # 1000 * 0.533 / 2993 = 0.17808... -> printed 0.1781.
+        computed = 1000.0 * compliance / tokens
+        assert abs(computed - per_1k) <= 0.51 * 10.0**-dp
+
+    def test_three_to_six_fold_efficiency_gap(self) -> None:
+        # sec:tokecon: "0.68 compliance points per thousand tokens for Brief
+        # against 0.11--0.19 for the field, a three- to six-fold gap".
+        brief = PARETO_ROWS[0][3]
+        field = [row[3] for row in PARETO_ROWS[1:]]
+        assert all(0.11 <= round(value, 2) <= 0.19 for value in field)
+        assert all(3.0 < brief / value < 6.2 for value in field)
