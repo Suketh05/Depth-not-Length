@@ -43,6 +43,7 @@ constant is asserted here; the machinery exists so a rerun can report one.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -227,7 +228,48 @@ _RATIONALE_TEMPLATES: dict[str, tuple[str, str]] = {
         "decision id {target!r} is never referenced (invariant names no code identifier)",
         "no code identifier in the invariant and the answer omits decision id {target!r}",
     ),
+    "negated": (
+        "invariant identifier {target!r} is only mentioned in a negated/opt-out clause "
+        "(asserted, not enforced)",
+        "every mention of {target!r} sits in a negation/opt-out clause; the invariant is "
+        "restated but not applied",
+    ),
 }
+
+# Sentence-level negation / opt-out cues. Section ``sec:gradervalidity`` flags the
+# gaming threat that "an arm could satisfy 'the invariant holds on the output' by
+# *restating* the decision (echoing the constraint or adding a guard comment)
+# rather than by a correct edit" and notes that "cleanly separating 'invariant
+# asserted' from 'invariant enforced by the change' is left to future grader
+# work". This guard is the deterministic first cut: a mention of an invariant
+# identifier counts only if at least one of its host sentences carries no
+# negation cue. The rule-based scorer has no such guard, which is exactly the
+# construct gap :func:`judge_rule_agreement` measures.
+_NEGATION_CUES = re.compile(
+    r"\b(?:not|never|no|without|skip(?:s|ped|ping)?|ignor(?:e|es|ed|ing)|"
+    r"avoid(?:s|ed|ing)?|omit(?:s|ted|ting)?|bypass(?:es|ed|ing)?|"
+    r"instead\s+of|rather\s+than)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
+
+
+def _sentences(text: str) -> list[str]:
+    """Split text into rough sentences (grading unit for the negation guard)."""
+    return [part for part in _SENTENCE_SPLIT.split(text) if part.strip()]
+
+
+def _enforced(keyword: str, answer_text: str) -> bool | None:
+    """Classify a keyword's mentions: True enforced, False only-negated, None absent.
+
+    A keyword is *enforced* when at least one sentence containing it carries no
+    negation/opt-out cue; *asserted-but-negated* when it appears only inside
+    negated sentences ("we will skip withAuditLog()"); absent otherwise.
+    """
+    hosts = [sentence for sentence in _sentences(answer_text) if keyword in sentence]
+    if not hosts:
+        return None
+    return any(not _NEGATION_CUES.search(sentence) for sentence in hosts)
 
 
 class StubComplianceJudge(ComplianceJudge):
@@ -281,20 +323,34 @@ class StubComplianceJudge(ComplianceJudge):
 
         1. Extract the invariant's concrete identifiers via
            :func:`membench.metrics.compliance.decision_keywords`.
-        2. If any identifier occurs in the answer, the invariant is honoured.
-        3. If the invariant names no identifier, fall back to the bare decision
+        2. If any identifier occurs in a non-negated sentence of the answer, the
+           invariant is *enforced* -> compliant.
+        3. If identifiers occur but only inside negated/opt-out sentences, the
+           invariant is merely *asserted* -> non-compliant (the gaming guard of
+           Section ``sec:gradervalidity``; the rule-based scorer credits this).
+        4. If the invariant names no identifier, fall back to the bare decision
            id (when provided), mirroring the rule-based scorer's last resort.
-        4. Otherwise the invariant is not honoured.
+        5. Otherwise the invariant is not honoured.
         """
         keywords = decision_keywords(case.invariant_text)
         if keywords:
+            negated: list[str] = []
             for keyword in sorted(keywords):
-                if keyword in case.answer_text:
+                status = _enforced(keyword, case.answer_text)
+                if status is True:
                     return JudgeVerdict(
                         compliant=True,
                         rationale=self._phrase("honored", keyword),
                         config=self._config,
                     )
+                if status is False:
+                    negated.append(keyword)
+            if negated:
+                return JudgeVerdict(
+                    compliant=False,
+                    rationale=self._phrase("negated", ", ".join(negated)),
+                    config=self._config,
+                )
             targets = ", ".join(sorted(keywords))
             return JudgeVerdict(
                 compliant=False,
