@@ -15,17 +15,21 @@ Goldens come from two independent sources, never from running the module:
 """
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import pytest
 
 from membench.analysis.token_economics import (
     BRIEF_SYSTEM,
+    CompetitorRecord,
     Matchup,
     MatchupOutcome,
     SessionRecord,
+    TournamentSummary,
     decide_matchup,
     pair_matchups,
+    run_tournament,
     session_tokens_from_turns,
     sweep_matchup_count,
 )
@@ -182,3 +186,149 @@ class TestPairMatchups:
             pair_matchups([_brief("m1", "t1", 100)], [_brief("m1", "t1", 150)])
         with pytest.raises(ValueError, match="must have system"):
             pair_matchups([_comp("mem0", "m1", "t1", 100)], [])
+
+
+class TestTournamentTallies:
+    def test_exact_fraction_win_rate_three_quarters(self) -> None:
+        # Hand-built: 3 wins, 1 loss => win rate exactly 3/4 = 0.75.
+        briefs = [_brief("m1", f"t{i}", 100) for i in range(4)]
+        comps = [
+            _comp("mem0", "m1", "t0", 150),  # win
+            _comp("mem0", "m1", "t1", 150),  # win
+            _comp("mem0", "m1", "t2", 150),  # win
+            _comp("mem0", "m1", "t3", 50),  # loss
+        ]
+        summary = run_tournament(briefs, comps)
+        assert (summary.matchups, summary.wins, summary.losses, summary.ties) == (4, 3, 1, 0)
+        assert summary.win_rate == 0.75  # exactly representable: 3/4
+        assert summary.win_rate_pct == 75.0
+
+    def test_per_competitor_split_with_exact_fractions(self) -> None:
+        # mem0: 1 win / 2 => 1/2; zep: 2 wins / 2 => 1.0; overall 3/4.
+        briefs = [_brief("m1", "t1", 100), _brief("m1", "t2", 100)]
+        comps = [
+            _comp("mem0", "m1", "t1", 300),  # win
+            _comp("mem0", "m1", "t2", 80),  # loss
+            _comp("zep", "m1", "t1", 101),  # win
+            _comp("zep", "m1", "t2", 400),  # win
+        ]
+        summary = run_tournament(briefs, comps)
+        assert summary.win_rate == 0.75
+        mem0 = summary.per_competitor["mem0"]
+        zep = summary.per_competitor["zep"]
+        assert (mem0.matchups, mem0.wins, mem0.losses, mem0.ties) == (2, 1, 1, 0)
+        assert mem0.win_rate == 0.5  # exactly 1/2
+        assert (zep.matchups, zep.wins, zep.losses, zep.ties) == (2, 2, 0, 0)
+        assert zep.win_rate == 1.0
+        # Per-competitor tallies partition the overall tally.
+        assert mem0.wins + zep.wins == summary.wins
+        assert mem0.matchups + zep.matchups == summary.matchups
+
+    def test_ties_counted_in_denominator_only(self) -> None:
+        briefs = [_brief("m1", "t1", 100), _brief("m1", "t2", 100)]
+        comps = [
+            _comp("mem0", "m1", "t1", 100),  # tie (equal spend)
+            _comp("mem0", "m1", "t2", 200),  # win
+        ]
+        summary = run_tournament(briefs, comps)
+        assert (summary.matchups, summary.wins, summary.losses, summary.ties) == (2, 1, 0, 1)
+        assert summary.win_rate == 0.5  # 1 win / 2 matchups; the tie dilutes
+
+    def test_empty_tournament_has_undefined_rate(self) -> None:
+        summary = run_tournament([], [])
+        assert (summary.matchups, summary.wins, summary.losses, summary.ties) == (0, 0, 0, 0)
+        assert summary.win_rate is None
+        assert summary.win_rate_pct is None
+        assert dict(summary.per_competitor) == {}
+
+    def test_competitor_record_rejects_inconsistent_tally(self) -> None:
+        with pytest.raises(ValueError, match="must equal matchups"):
+            CompetitorRecord(competitor="mem0", matchups=360, wins=291, losses=68, ties=0)
+
+    def test_seeded_synthetic_sweep_matches_independent_tally(self) -> None:
+        # Deterministic 4 LLMs x 5 tasks x 3 competitors = 60-matchup sweep;
+        # expected counts computed by an independent plain-loop tally over the
+        # same generated tokens, never by the module under test.
+        rng = random.Random(20260628)
+        llms = [f"llm{i}" for i in range(4)]
+        tasks = [f"task{j}" for j in range(5)]
+        competitors = ["mem0", "zep", "oiya"]
+        brief_tokens = {(m, t): rng.randint(1000, 3000) for m in llms for t in tasks}
+        comp_tokens = {
+            (c, m, t): rng.randint(1000, 3000) for c in competitors for m in llms for t in tasks
+        }
+
+        expected_wins = dict.fromkeys(competitors, 0)
+        expected_losses = dict.fromkeys(competitors, 0)
+        expected_ties = dict.fromkeys(competitors, 0)
+        for (c, m, t), ct in comp_tokens.items():
+            bt = brief_tokens[(m, t)]
+            if bt < ct:
+                expected_wins[c] += 1
+            elif bt > ct:
+                expected_losses[c] += 1
+            else:
+                expected_ties[c] += 1
+
+        briefs = [_brief(m, t, tok) for (m, t), tok in brief_tokens.items()]
+        comps = [_comp(c, m, t, tok) for (c, m, t), tok in comp_tokens.items()]
+        summary = run_tournament(briefs, comps)
+
+        assert summary.matchups == sweep_matchup_count(4, 5, 3) == 60
+        assert summary.wins == sum(expected_wins.values())
+        assert summary.losses == sum(expected_losses.values())
+        assert summary.ties == sum(expected_ties.values())
+        for c in competitors:
+            rec = summary.per_competitor[c]
+            assert rec.matchups == 20
+            assert (rec.wins, rec.losses, rec.ties) == (
+                expected_wins[c],
+                expected_losses[c],
+                expected_ties[c],
+            )
+            assert rec.win_rate == expected_wins[c] / 20
+
+    def test_summary_reconstructs_paper_headline_from_published_counts(self) -> None:
+        # Verbatim per-competitor (wins, losses) of tab:tok_context_by_competitor;
+        # 360 matchups per layer, 0 ties.
+        published = {
+            "mem0": (291, 69),
+            "zep": (279, 81),
+            "contextq": (282, 78),
+            "oracle_summary": (312, 48),
+            "supermemory": (288, 72),
+            "unabyss": (303, 57),
+            "driver": (296, 64),
+            "oiya": (247, 113),
+            "kluris": (302, 58),
+            "none": (280, 80),
+        }
+        summary = TournamentSummary(
+            matchups=3600,
+            wins=sum(w for w, _ in published.values()),
+            losses=sum(losses for _, losses in published.values()),
+            ties=0,
+            per_competitor={
+                name: CompetitorRecord(competitor=name, matchups=360, wins=w, losses=losses, ties=0)
+                for name, (w, losses) in published.items()
+            },
+        )
+        # tab:tok_context_winrate: 2880 wins, 720 losses, 80.0%.
+        assert summary.wins == 2880
+        assert summary.losses == 720
+        assert summary.win_rate == 2880 / 3600 == 0.8
+        # tab:tok_context_by_competitor: printed one-decimal percentages.
+        pct = {name: summary.per_competitor[name].win_rate_pct for name in published}
+        rounded = {name: round(p, 1) for name, p in pct.items() if p is not None}
+        assert rounded == {
+            "mem0": 80.8,
+            "zep": 77.5,
+            "contextq": 78.3,
+            "oracle_summary": 86.7,
+            "supermemory": 80.0,
+            "unabyss": 84.2,
+            "driver": 82.2,
+            "oiya": 68.6,
+            "kluris": 83.9,
+            "none": 77.8,
+        }
