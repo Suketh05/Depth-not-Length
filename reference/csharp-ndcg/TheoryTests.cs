@@ -14,6 +14,16 @@ using Xunit;
 
 namespace Membench;
 
+/// <summary>
+/// Verification index (source -> what it pins):
+///   golden pack A.1  -> similarity recovery table, per-hop product identity, float64 underflow
+///   golden pack A.2  -> structured recovery q^d table and power law
+///   golden pack A.3  -> gap table, ~29x depth-3 separation, overhead ratio, crossover, win region
+///   golden pack A.4  -> binary entropy, BSC capacity, uniform Fano floor 1-1/K
+///   paper tab:realret -> kappa = compliance/recall for all 7 published arm rows (+ unpublished none)
+///   paper tab:scorecard -> 22 + 14 + 5 = 41 axes
+/// Every literal is copied from the golden pack / paper, not produced by running Theory.cs.
+/// </summary>
 public class TheoryTests
 {
     private static readonly SurvivalModel Calib = Theory.Calibration; // s0=0.70, rho=0.67, q=0.97
