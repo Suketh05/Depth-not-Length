@@ -46,13 +46,18 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from membench.metrics.compliance import decision_keywords
 from membench.types import Task
 
+if TYPE_CHECKING:  # imported lazily at runtime: the offline pipeline never needs it
+    from membench.agents.llm.base import LLMClient
+
 __all__ = [
     "PROMPT_ORDERS",
     "ComplianceJudge",
+    "LLMComplianceJudge",
     "JudgeCase",
     "JudgeConfig",
     "JudgeVerdict",
@@ -520,3 +525,85 @@ def parse_judge_verdict(text: str, config: JudgeConfig) -> JudgeVerdict:
     rationale_match = _RATIONALE_PATTERN.search(text)
     rationale = rationale_match.group(1).strip() if rationale_match else text.strip()
     return JudgeVerdict(compliant=compliant, rationale=rationale, config=config)
+
+
+class LLMComplianceJudge(ComplianceJudge):
+    """Live LLM judge backend (the "LLM-assisted" half of Section ``sec:grader``).
+
+    Reuses the :class:`membench.agents.llm.base.LLMClient` contract, so any
+    configured backend (Anthropic, OpenAI, or an injected fake in tests) can act
+    as the judge. When no client is injected, one is built lazily from
+    :func:`membench.agents.combos.make_llm_client` with ``offline=False`` on the
+    first :meth:`judge` call -- construction, not just SDK import, is deferred, so
+    merely instantiating this class stays offline-safe. Real judging requires
+    network and keys and is exercised only by ``live``-marked tests.
+
+    Two protocol obligations from the paper are the caller's responsibility and
+    are recorded rather than enforced here: the judge must be "distinct from the
+    answer models" (Sections ``sec:grader``, ``sec:stats``), and ``config.model``
+    should be an exact snapshot string in reported runs. ``config.temperature``
+    records the intended decoding configuration; the shared ``LLMClient.complete``
+    contract does not expose a temperature knob, so backends run at their
+    default and the recorded value documents intent (Section ``sec:stats``).
+
+    Parameters
+    ----------
+    client
+        An :class:`~membench.agents.llm.base.LLMClient` to use as the judge. When
+        ``None``, ``model_key`` is resolved lazily via ``make_llm_client``.
+    model_key
+        Model-grid key (e.g. ``"claude"``) used for lazy construction and, when no
+        client is injected, as the recorded model identity.
+    prompt_order
+        Presentation order for :func:`build_judge_prompt`.
+    version
+        Judge prompt/rubric version tag recorded on every verdict.
+    max_tokens
+        Verdict-length cap passed to the client.
+    """
+
+    def __init__(
+        self,
+        client: LLMClient | None = None,
+        *,
+        model_key: str = "claude",
+        prompt_order: str = "invariant_first",
+        version: str = "llm-judge-v1",
+        max_tokens: int = 256,
+    ) -> None:
+        self._client = client
+        self._model_key = model_key
+        self._config = JudgeConfig(
+            model=client.model_name if client is not None else model_key,
+            version=version,
+            prompt_order=prompt_order,
+            temperature=0.0,
+            max_tokens=max_tokens,
+        )
+
+    @property
+    def config(self) -> JudgeConfig:
+        """The judge's recorded identity (model, version, prompt order, decoding)."""
+        return self._config
+
+    def _ensure_client(self) -> LLMClient:
+        if self._client is None:
+            # Lazy: only a live judging call pays the import and needs keys.
+            from membench.agents.combos import make_llm_client
+
+            self._client = make_llm_client(self._model_key, offline=False)
+            self._config = JudgeConfig(
+                model=self._client.model_name,
+                version=self._config.version,
+                prompt_order=self._config.prompt_order,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
+            )
+        return self._client
+
+    def judge(self, case: JudgeCase) -> JudgeVerdict:
+        """Prompt the judge model with the arm-blind case and parse its verdict."""
+        client = self._ensure_client()
+        system, user = build_judge_prompt(case, self._config)
+        response = client.complete(system, user, max_tokens=self._config.max_tokens)
+        return parse_judge_verdict(response.text, self._config)
