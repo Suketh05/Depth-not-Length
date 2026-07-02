@@ -11,14 +11,19 @@ check with a hand calculator.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+
 import pytest
 
+from membench.agents.llm.base import LLMClient, LLMResponse
 from membench.agents.llm.pricing import (
     PAPER_SESSION_RATES,
     PRICING,
     UNPRICED_SWEEP_MODELS,
     blended_session_dollars,
+    price_dollars,
 )
+from membench.agents.runner import RunConfig
 from membench.agents.session import (
     PaperLedgerRow,
     Session,
@@ -28,9 +33,12 @@ from membench.agents.session import (
     ledger_rows,
     matchup_winner,
     paper_ledger_row,
+    run_session,
     tokens_per_resolved_point,
     win_rate,
 )
+from membench.retrieval.base import MemorySystem, pack_to_budget
+from membench.types import MemoryItem, RetrievedContext, Scorer, SpecVariant, Task
 
 # ---------------------------------------------------------------------------
 # tab:tok_agent_context_gpt55 — "Multi-turn collapse, one fixed backend model
@@ -488,3 +496,154 @@ class TestSessionValidation:
             tokens_per_resolved_point(1000, 0.0)
         with pytest.raises(ValueError, match="non-negative"):
             tokens_per_resolved_point(-1, 10.0)
+
+
+# ---------------------------------------------------------------------------
+# run_session: convergence detection and driver mechanics (offline).
+# ---------------------------------------------------------------------------
+
+
+def _task(query: str = "make the export dialog call to action accessible") -> Task:
+    corpus = (
+        MemoryItem("D-1", "primary buttons must use the Button component", {"node_type": "c"}),
+        MemoryItem(
+            "D-1-rationale",
+            "the export dialog call to action should be accessible",
+            {"node_type": "j", "constrains": "D-1"},
+        ),
+        MemoryItem("D-2", "use the DateRangePicker widget"),
+    )
+    return Task(
+        task_id="t1",
+        dataset="dcbench",
+        query=query,
+        repo_ref="github.com/x/y@a",
+        memory_corpus=corpus,
+        governing_decisions=("D-1",),
+        depth=2,
+        spec_variant=SpecVariant.STRIPPED,
+        scorer=Scorer.COMPLIANCE,
+    )
+
+
+class _CountingMemory(MemorySystem):
+    """Returns the whole corpus as context; counts retrieve calls."""
+
+    def __init__(self) -> None:
+        self.items: list[MemoryItem] = []
+        self.retrieve_calls = 0
+
+    def write(self, items: Iterable[MemoryItem]) -> None:
+        self.items.extend(items)
+
+    def retrieve(self, query: str, budget_tokens: int) -> RetrievedContext:
+        self.retrieve_calls += 1
+        return pack_to_budget(((item.item_id, item.text) for item in self.items), budget_tokens)
+
+
+class _ScriptedLLM(LLMClient):
+    """Replays a fixed script of (text, prompt_tokens, completion_tokens)."""
+
+    def __init__(self, script: list[tuple[str, int, int]]) -> None:
+        self._script = script
+        self.calls = 0
+
+    @property
+    def model_name(self) -> str:
+        return "stub"
+
+    def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
+        text, prompt_tokens, completion_tokens = self._script[min(self.calls, len(self._script) - 1)]
+        self.calls += 1
+        return LLMResponse(
+            text=text,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            dollars=price_dollars("stub", prompt_tokens, completion_tokens),
+            model="stub",
+        )
+
+
+def _resolved_on(marker: str) -> Callable[[str, Task], bool]:
+    def is_resolved(text: str, _task: Task) -> bool:
+        return marker in text
+
+    return is_resolved
+
+
+class TestRunSessionConvergence:
+    def test_converges_at_scripted_turn_three(self) -> None:
+        # Mirrors the shape of the paper's Brief-context row: heavy turn 1, a
+        # small confirmation turn 2, and a tiny resolving turn 3.
+        llm = _ScriptedLLM([("searching", 1500, 98), ("narrowing", 150, 53), ("DONE", 24, 10)])
+        memory = _CountingMemory()
+        session = run_session(
+            _task(), memory, llm, RunConfig(budget_tokens=250),
+            arm_name="brief_graph", is_resolved=_resolved_on("DONE"),
+        )
+        assert session.convergence_turn == 3
+        assert session.resolved is True
+        assert session.n_turns == 3
+        assert [t.turn_tokens for t in session.turns] == [1598, 203, 34]  # collapse shape
+        assert paper_ledger_row(session).turn4_plus is None
+
+    def test_unresolved_session_runs_to_the_turn_cap(self) -> None:
+        llm = _ScriptedLLM([("still searching", 100, 20)])
+        session = run_session(
+            _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
+            arm_name="none", is_resolved=_resolved_on("DONE"), max_turns=5,
+        )
+        assert session.n_turns == 5
+        assert session.resolved is False
+        assert session.convergence_turn is None
+
+    def test_first_turn_resolution_is_a_one_turn_session(self) -> None:
+        llm = _ScriptedLLM([("DONE at once", 400, 30)])
+        session = run_session(
+            _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
+            arm_name="brief_graph", is_resolved=_resolved_on("DONE"),
+        )
+        assert session.n_turns == 1
+        assert session.convergence_turn == 1
+
+    def test_context_is_injected_exactly_once(self) -> None:
+        # sec:tokecon: the context layer is injected once on turn 1; later
+        # turns must not re-retrieve.
+        memory = _CountingMemory()
+        llm = _ScriptedLLM([("keep going", 100, 10)])
+        run_session(
+            _task(), memory, llm, RunConfig(budget_tokens=250),
+            arm_name="brief_graph", is_resolved=_resolved_on("DONE"), max_turns=4,
+        )
+        assert memory.retrieve_calls == 1
+        assert llm.calls == 4  # one completion per turn, no hidden retries
+
+    def test_turn_one_provenance_comes_from_the_offline_runner(self) -> None:
+        memory = _CountingMemory()
+        llm = _ScriptedLLM([("DONE", 100, 10)])
+        session = run_session(
+            _task(), memory, llm, RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph", is_resolved=_resolved_on("DONE"),
+        )
+        assert session.retrieved_ids == ("D-1", "D-1-rationale", "D-2")
+        assert session.governing_decisions == ("D-1",)
+        assert session.arm == "brief_graph" and session.dataset == "dcbench"
+
+    def test_session_dollars_sum_the_per_turn_pricing(self) -> None:
+        # stub pricing is $1/Mtok in, $5/Mtok out (pricing.PRICING["stub"]).
+        # Script: (1000 in, 200 out) then (500 in, 100 out) resolving ->
+        # (1000*1 + 200*5)/1e6 + (500*1 + 100*5)/1e6 = 0.002 + 0.001 = 0.003.
+        llm = _ScriptedLLM([("working", 1000, 200), ("DONE", 500, 100)])
+        session = run_session(
+            _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
+            arm_name="bm25", is_resolved=_resolved_on("DONE"),
+        )
+        assert session.session_dollars == pytest.approx(0.003, abs=1e-15)
+
+    def test_max_turns_must_be_positive(self) -> None:
+        llm = _ScriptedLLM([("x", 1, 1)])
+        with pytest.raises(ValueError, match="max_turns"):
+            run_session(
+                _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
+                arm_name="none", is_resolved=_resolved_on("DONE"), max_turns=0,
+            )
