@@ -144,4 +144,71 @@ class CrossoverTest {
         assertThrows(IllegalArgumentException.class,
                 () -> Crossover.bracketCrossoverDepth(new Recovery.Model(0.7, 1.2, 0.9), 0.1));
     }
+
+    // ---- grid consistency: the integer scan agrees with the closed-form bracket ----
+
+    private static final double[] GRID_S0 = {0.5, 0.7, 0.9};
+    private static final double[] GRID_RHO = {0.3, 0.6, 0.8};
+    private static final double[] GRID_Q = {0.9, 0.95, 0.99};
+
+    @Test
+    void continuousRootHasZeroGapAcrossGrid() {
+        for (double s0 : GRID_S0) {
+            for (double rho : GRID_RHO) {
+                for (double q : GRID_Q) {
+                    Recovery.Model m = new Recovery.Model(s0, rho, q);
+                    double d0 = Crossover.tauZeroCrossover(m);
+                    assertEquals(0.0, Crossover.g(d0, m), 1e-9,
+                            "g(d0) at s0=" + s0 + " rho=" + rho + " q=" + q);
+                }
+            }
+        }
+    }
+
+    @Test
+    void zeroOverheadScanMatchesClosedFormLowerBoundAcrossGrid() {
+        // At tau = 0 the smallest winning integer depth is exactly floor(d0)+1 (clipped
+        // at 1). The integer scan and the O(1) bracket must return the same d*.
+        for (double s0 : GRID_S0) {
+            for (double rho : GRID_RHO) {
+                for (double q : GRID_Q) {
+                    Recovery.Model m = new Recovery.Model(s0, rho, q);
+                    Crossover.CrossoverBounds b = Crossover.bracketCrossoverDepth(m, 0.0);
+                    Crossover.CrossoverResult r = Crossover.findCrossoverDepth(m, 0.0);
+                    int closed = Math.max(1, (int) Math.floor(Crossover.tauZeroCrossover(m)) + 1);
+                    assertEquals(closed, b.dLower(), "bracket d_lower");
+                    assertTrue(r.exists(), "structure must eventually win at tau=0");
+                    assertEquals(closed, r.dStar(),
+                            "scan d* at s0=" + s0 + " rho=" + rho + " q=" + q);
+                }
+            }
+        }
+    }
+
+    @Test
+    void closedFormBracketContainsScanResultAcrossGrid() {
+        // For nonzero overheads the O(1) bracket must bracket the scan's d* and its
+        // win window must contain the scan's win region (bounds.py contract).
+        double[] taus = {0.05, 0.2, 0.4, 0.6};
+        for (double s0 : GRID_S0) {
+            for (double rho : GRID_RHO) {
+                for (double q : GRID_Q) {
+                    Recovery.Model m = new Recovery.Model(s0, rho, q);
+                    for (double tau : taus) {
+                        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(m, tau);
+                        Crossover.CrossoverBounds b = Crossover.bracketCrossoverDepth(m, tau);
+                        if (!r.exists()) {
+                            continue; // nothing to bracket
+                        }
+                        String at = "s0=" + s0 + " rho=" + rho + " q=" + q + " tau=" + tau;
+                        assertTrue(b.hasWinWindow(), "window must exist when scan wins @ " + at);
+                        assertTrue(b.dLower() <= r.dStar(), "d_lower <= d* @ " + at);
+                        assertTrue(r.dStar() <= b.dUpper(), "d* <= d_upper @ " + at);
+                        assertTrue(b.winLo() <= r.winLo(), "window contains region lo @ " + at);
+                        assertTrue(b.winHi() >= r.winHi(), "window contains region hi @ " + at);
+                    }
+                }
+            }
+        }
+    }
 }
