@@ -14,6 +14,7 @@ The per-competitor win counts sum to exactly 2880, and each equals
 
 from __future__ import annotations
 
+import csv
 from fractions import Fraction
 from pathlib import Path
 
@@ -182,6 +183,65 @@ class TestFullSweepTournament:
         assert max(pct.values()) == 86.7  # Oracle Summary
         assert pct["oiya"] == 68.6
         assert pct["oracle_summary"] == 86.7
+
+
+def _load_paper_csv() -> dict[str, float]:
+    """Read the committed metric->value rows of paper_token_economics.csv."""
+    with _PAPER_CSV.open(newline="") as handle:
+        return {row["metric"]: float(row["value"]) for row in csv.DictReader(handle)}
+
+
+class TestPaperCsvIdentity:
+    """The cross-check a reader runs directly against the committed CSV.
+
+    ``results/data/paper_token_economics.csv`` carries the published aggregates of
+    tab:tok_context_winrate / tab:tok_context_by_competitor. These identities show
+    the numbers are internally consistent and that this module's arithmetic agrees.
+    """
+
+    def test_headline_win_rate_identity(self) -> None:
+        data = _load_paper_csv()
+        assert data["matchups_total"] == TOTAL_MATCHUPS
+        assert data["matchups_won"] == BRIEF_WINS
+        assert data["matchups_lost"] == BRIEF_LOSSES
+        assert data["matchups_tied"] == 0
+        # won + lost + tied == total.
+        assert (
+            data["matchups_won"] + data["matchups_lost"] + data["matchups_tied"]
+            == (data["matchups_total"])
+        )
+        # 2880 / 3600 = 0.800 == published percentage.
+        assert data["matchups_won"] / data["matchups_total"] == 0.8
+        assert data["session_token_win_rate_pct"] == 80.0
+
+    def test_per_competitor_reconstructs_2880(self) -> None:
+        data = _load_paper_csv()
+        # Map CSV keys (win_rate_vs_<layer>_pct) back to competitor names.
+        published_pct = {
+            key[len("win_rate_vs_") : -len("_pct")]: value
+            for key, value in data.items()
+            if key.startswith("win_rate_vs_") and key.endswith("_pct")
+        }
+        assert set(published_pct) == set(COMPETITOR_WIN_PCT)
+        assert published_pct == COMPETITOR_WIN_PCT
+        # Reconstruct wins = round(pct/100 * 360); the ten rows sum to 2880.
+        reconstructed = {
+            competitor: round(pct / 100.0 * MATCHUPS_PER_COMPETITOR)
+            for competitor, pct in published_pct.items()
+        }
+        assert reconstructed == COMPETITOR_WINS
+        assert sum(reconstructed.values()) == BRIEF_WINS
+        assert sum(reconstructed.values()) / TOTAL_MATCHUPS == 0.8
+
+    def test_win_rate_band(self) -> None:
+        data = _load_paper_csv()
+        pct_values = [
+            value
+            for key, value in data.items()
+            if key.startswith("win_rate_vs_") and key.endswith("_pct")
+        ]
+        assert min(pct_values) == 68.6
+        assert max(pct_values) == 86.7
 
 
 class TestSessionRecord:
