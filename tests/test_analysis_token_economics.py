@@ -23,6 +23,10 @@ from membench.analysis.token_economics import (
     Matchup,
     MatchupOutcome,
     SessionRecord,
+    WinRate,
+    build_matchups,
+    tally,
+    tally_by_competitor,
 )
 
 # --- Paper goldens: tab:tok_context_winrate ---------------------------------
@@ -101,6 +105,10 @@ def _session(
     )
 
 
+def _keys(matchups: tuple[Matchup, ...]) -> list[tuple[str, str, str]]:
+    return [(m.backend_model, m.task_id, m.competitor) for m in matchups]
+
+
 class TestSessionRecord:
     def test_totals_and_fields(self) -> None:
         rec = _session("gpt-5.5", "swe-001", "brief", 1835, resolved=True)
@@ -139,3 +147,109 @@ class TestMatchupOutcome:
 
     def test_default_brief_layer_constant(self) -> None:
         assert DEFAULT_BRIEF_LAYER == "brief"
+
+
+class TestBuildMatchups:
+    def test_one_cell_pairs_brief_against_each_competitor(self) -> None:
+        sessions = [
+            _session("gpt-5.5", "swe-001", "brief", 1835),
+            _session("gpt-5.5", "swe-001", "mem0", 4737),
+            _session("gpt-5.5", "swe-001", "zep", 2724),
+        ]
+        matchups = build_matchups(sessions)
+        assert len(matchups) == 2
+        # Deterministic: competitors sorted by name (mem0 before zep).
+        assert [m.competitor for m in matchups] == ["mem0", "zep"]
+        assert all(m.brief_tokens == 1835 for m in matchups)
+        assert [m.competitor_tokens for m in matchups] == [4737, 2724]
+        assert all(m.brief_wins for m in matchups)
+
+    def test_order_independent_of_input_order(self) -> None:
+        forward = [
+            _session("a", "t1", "brief", 100),
+            _session("a", "t1", "zep", 200),
+            _session("b", "t1", "brief", 100),
+            _session("b", "t1", "mem0", 50),
+        ]
+        reversed_input = list(reversed(forward))
+        assert _keys(build_matchups(forward)) == _keys(build_matchups(reversed_input))
+        # Sorted by (model, task) then competitor.
+        assert _keys(build_matchups(forward)) == [
+            ("a", "t1", "zep"),
+            ("b", "t1", "mem0"),
+        ]
+
+    def test_custom_brief_layer_name(self) -> None:
+        sessions = [
+            _session("m", "t", "typed_graph", 100),
+            _session("m", "t", "mem0", 200),
+        ]
+        matchups = build_matchups(sessions, brief_layer="typed_graph")
+        assert len(matchups) == 1
+        assert matchups[0].brief_tokens == 100
+        assert matchups[0].competitor == "mem0"
+
+    def test_empty_input_yields_no_matchups(self) -> None:
+        assert build_matchups([]) == ()
+
+    def test_duplicate_brief_session_rejected(self) -> None:
+        sessions = [
+            _session("m", "t", "brief", 100),
+            _session("m", "t", "brief", 101),
+            _session("m", "t", "mem0", 200),
+        ]
+        with pytest.raises(ValueError, match="duplicate 'brief'"):
+            build_matchups(sessions)
+
+    def test_duplicate_competitor_session_rejected(self) -> None:
+        sessions = [
+            _session("m", "t", "brief", 100),
+            _session("m", "t", "mem0", 200),
+            _session("m", "t", "mem0", 201),
+        ]
+        with pytest.raises(ValueError, match="duplicate 'mem0'"):
+            build_matchups(sessions)
+
+    def test_missing_brief_baseline_rejected(self) -> None:
+        # A cell with a competitor but no brief session is a data error, not a skip.
+        sessions = [_session("m", "t", "mem0", 200)]
+        with pytest.raises(ValueError, match="no 'brief' session"):
+            build_matchups(sessions)
+
+
+class TestTally:
+    def test_counts_and_rate(self) -> None:
+        matchups = [
+            Matchup("m", "t", "a", brief_tokens=1, competitor_tokens=2),  # win
+            Matchup("m", "t", "b", brief_tokens=2, competitor_tokens=1),  # loss
+            Matchup("m", "t", "c", brief_tokens=3, competitor_tokens=3),  # tie
+            Matchup("m", "t", "d", brief_tokens=1, competitor_tokens=5),  # win
+        ]
+        result = tally(matchups)
+        assert result == WinRate(wins=2, losses=1, ties=1)
+        assert result.total == 4
+        assert result.rate == 0.5  # ties stay in the denominator
+        assert result.loss_rate == 0.25
+
+    def test_empty_rate_is_undefined(self) -> None:
+        result = tally([])
+        assert result.total == 0
+        with pytest.raises(ValueError, match="undefined"):
+            _ = result.rate
+        with pytest.raises(ValueError, match="undefined"):
+            _ = result.loss_rate
+
+    def test_by_competitor_partitions(self) -> None:
+        matchups = [
+            Matchup("m", "t1", "mem0", brief_tokens=1, competitor_tokens=2),  # win
+            Matchup("m", "t2", "mem0", brief_tokens=2, competitor_tokens=1),  # loss
+            Matchup("m", "t1", "zep", brief_tokens=1, competitor_tokens=2),  # win
+        ]
+        by_competitor = tally_by_competitor(matchups)
+        assert list(by_competitor) == ["mem0", "zep"]  # sorted keys
+        assert by_competitor["mem0"] == WinRate(wins=1, losses=1, ties=0)
+        assert by_competitor["zep"] == WinRate(wins=1, losses=0, ties=0)
+        # Per-competitor totals reconstitute the overall tally.
+        overall = tally(matchups)
+        assert sum(wr.wins for wr in by_competitor.values()) == overall.wins
+        assert sum(wr.total for wr in by_competitor.values()) == overall.total
