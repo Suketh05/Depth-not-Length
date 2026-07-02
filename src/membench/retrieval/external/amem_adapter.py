@@ -66,7 +66,9 @@ class AMemMemory(MemorySystem):
         self._provider = provider or HashingEmbeddingProvider()
         self._items: list[MemoryItem] = []
         self._matrix: NDArray[np.float64] | None = None
-        self._links: dict[int, list[int]] = {}
+        # Per-note association list: (neighbour index, association strength = anchor cosine),
+        # sorted strongest-first at write time so retrieval order is fully determined.
+        self._links: dict[int, list[tuple[int, float]]] = {}
 
     def write(self, items: Iterable[MemoryItem]) -> None:
         """Embed the corpus and form each note's associative link to its nearest earlier note."""
@@ -75,18 +77,22 @@ class AMemMemory(MemorySystem):
         if n == 0:
             return
         self._matrix = self._provider.embed([item.text for item in self._items])
-        self._links = {i: [] for i in range(n)}
-        if n < 2:
-            return
-        # Zettelkasten link formation: note i connects to the earlier note it most
-        # resembles. argmax over the strictly-earlier prefix keeps the link acyclic in
-        # time and fully determined by the (deterministic) embedding cosine.
-        gram = cosine_similarity_matrix(self._matrix, self._matrix)
-        for i in range(1, n):
-            j = int(np.argmax(gram[i, :i]))
-            if gram[i, j] > 0.0:
-                self._links[i].append(j)
-                self._links[j].append(i)
+        links: dict[int, list[tuple[int, float]]] = {i: [] for i in range(n)}
+        if n >= 2:
+            # Zettelkasten link formation: note i connects to the earlier note it most
+            # resembles. argmax over the strictly-earlier prefix keeps the link acyclic in
+            # time and fully determined by the (deterministic) embedding cosine.
+            gram = cosine_similarity_matrix(self._matrix, self._matrix)
+            for i in range(1, n):
+                j = int(np.argmax(gram[i, :i]))
+                strength = float(gram[i, j])
+                if strength > 0.0:
+                    links[i].append((j, strength))
+                    links[j].append((i, strength))
+        # Strongest association first (stable on ties), so a spread is deterministic.
+        self._links = {
+            i: sorted(neighbors, key=lambda pair: -pair[1]) for i, neighbors in links.items()
+        }
 
     def _ordered_indices(self, query_vec: NDArray[np.float64]) -> list[int]:
         assert self._matrix is not None
@@ -98,9 +104,10 @@ class AMemMemory(MemorySystem):
             if seed not in seen:
                 seen.add(seed)
                 emitted.append(seed)
-            # Spread one associative hop from the seed, best-linked-first, so a note
-            # reached only through the association ranks right behind its anchor.
-            for neighbor in sorted(self._links.get(seed, ()), key=lambda k: -sims[k]):
+            # Spread one associative hop as a block right behind the anchor, ordered by
+            # association strength (NOT query resemblance): this is what lets a linked note
+            # that the query does not resemble surface ahead of higher-similarity non-neighbours.
+            for neighbor, _strength in self._links.get(seed, ()):
                 if neighbor not in seen:
                     seen.add(neighbor)
                     emitted.append(neighbor)
