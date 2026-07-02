@@ -162,5 +162,45 @@ public static class Theory
         return null;
     }
 
+    // ---- A.3 (cont.) closed-form tau=0 crossover + win-region window (bounds.py) ----
+
+    /// <summary>
+    /// Continuous closed-form tau=0 crossover root d0 = 2*ln(q/s0)/ln(rho) - 1
+    /// (bounds.py::tau_zero_crossover). At the paper calibration d0 = -2.629133632756974,
+    /// i.e. structure already dominates for every real depth d &gt;= 1.
+    /// </summary>
+    public static double TauZeroCrossoverContinuous(SurvivalModel model)
+    {
+        RequireModel(model);
+        return 2.0 * Math.Log(model.Q / model.S0) / Math.Log(model.Rho) - 1.0;
+    }
+
+    /// <summary>
+    /// Integer closed-form tau=0 crossover depth d_lower = max(1, floor(d0)+1) (bounds.py).
+    /// At the calibration this is 1 -- "closed-form crossover = d*=1" (Prop prop:cross): the
+    /// smallest depth at which g&gt;0, distinct from the calibrated (post-hoc) d*=2.
+    /// </summary>
+    public static int TauZeroCrossoverDepth(SurvivalModel model)
+    {
+        double d0 = TauZeroCrossoverContinuous(model);
+        return Math.Max(1, (int)Math.Floor(d0) + 1);
+    }
+
+    /// <summary>
+    /// The structured-win region: the depths d in 1..maxDepth where g(d) &gt; tau (strict).
+    /// For q &lt; 1 this is a contiguous interval, not a half-line, because g is unimodal
+    /// (golden pack A.3 "win region is the contiguous interval where g &gt; tau").
+    /// </summary>
+    public static IReadOnlyList<int> WinRegionDepths(SurvivalModel model, double tau, int maxDepth)
+    {
+        RequireModel(model);
+        RequireTau(tau);
+        var wins = new List<int>();
+        for (int d = 1; d <= maxDepth; d++)
+            if (Gap(d, model) > tau)
+                wins.Add(d);
+        return wins;
+    }
+
     // === derivations appended below ===
 }
