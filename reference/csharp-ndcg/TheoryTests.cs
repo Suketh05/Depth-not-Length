@@ -134,4 +134,33 @@ public class TheoryTests
         Assert.Equal(new[] { 1, 2, 3, 4, 5 }, Theory.WinRegionDepths(Calib, 0.0, 5));
         Assert.Equal(new[] { 2, 3, 4, 5 }, Theory.WinRegionDepths(Calib, 0.501, 5));
     }
+
+    // ---- A.4 Fano floor / capacity (eq:fano, Thm thm:fano; capacity.py) ----
+
+    [Fact]
+    public void BinaryEntropyAndCapacityGoldens()
+    {
+        // Golden pack A.4: H_b(0.5) = 1.0 bit; H_b(0) = H_b(1) = 0.
+        Assert.Equal(1.0, Theory.BinaryEntropy(0.5), Tol);
+        Assert.Equal(0.0, Theory.BinaryEntropy(0.0));
+        Assert.Equal(0.0, Theory.BinaryEntropy(1.0));
+        // C(0.5) = 0 (pure noise carries nothing); C(0) = C(1) = 1.0.
+        Assert.Equal(0.0, Theory.BscCapacity(0.5), Tol);
+        Assert.Equal(1.0, Theory.BscCapacity(0.0), Tol);
+        Assert.Equal(1.0, Theory.BscCapacity(1.0), Tol);
+    }
+
+    [Fact]
+    public void ContextFreeFanoFloorIsOneMinusOneOverK()
+    {
+        // Golden pack A.4 / eq:fano: uniform 1/K case, floor = 1 - 1/K exactly (Fano tight at I=0).
+        Assert.Equal(0.5, Theory.ContextFreeFloor(2), Tol);
+        Assert.Equal(0.75, Theory.ContextFreeFloor(4), Tol);
+        Assert.Equal(0.9, Theory.ContextFreeFloor(10), Tol);
+        // Prior entropy = log2 K bits; Bayes accuracy = 1/K; floor = 1 - accuracy.
+        Assert.Equal(1.0, Theory.UniformPriorEntropy(2), Tol);
+        Assert.Equal(2.0, Theory.UniformPriorEntropy(4), Tol);
+        Assert.Equal(0.5, Theory.UniformBayesAccuracy(2), Tol);
+        Assert.Equal(1.0 - Theory.UniformBayesAccuracy(4), Theory.ContextFreeFloor(4), Tol);
+    }
 }
