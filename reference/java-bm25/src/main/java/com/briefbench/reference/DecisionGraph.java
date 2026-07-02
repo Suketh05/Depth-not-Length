@@ -261,4 +261,69 @@ public final class DecisionGraph {
         }
         return false;
     }
+
+    // ==================================================================
+    // THEORY KERNELS (closed forms only; goldens live in the golden pack).
+    // ==================================================================
+
+    /** Number of supersedes edges in a chain of {@code n} versions: {@code n-1}. */
+    public static int edgeHops(int n) {
+        requireChainLength(n);
+        return n - 1;
+    }
+
+    /**
+     * Structured supersession recovery (theory/supersession.py): a link-follower
+     * traverses {@code n-1} supersedes edges of per-edge fidelity {@code q} to reach
+     * the head, recovering it with probability {@code q^(n-1)} (1.0 when {@code n=1}).
+     * Golden: n=2,q=0.95 -&gt; 0.95; n=4,q=0.9 -&gt; 0.9^3 = 0.729.
+     */
+    public static double structuredSupersessionRecovery(int n, double q) {
+        requireChainLength(n);
+        requireFidelity(q);
+        return Math.pow(q, n - 1);
+    }
+
+    /**
+     * Similarity supersession recovery: a recency-agnostic retriever picks uniformly
+     * among the {@code n} near-identical versions, so it returns the current head with
+     * the chance floor {@code 1/n} (0.5 at n=2 — the chance baseline in tab:super).
+     */
+    public static double similaritySupersessionRecovery(int n) {
+        requireChainLength(n);
+        return 1.0 / n;
+    }
+
+    /** Structured advantage {@code q^(n-1) - 1/n}. Golden: n=2,q=0.95 -&gt; 0.45. */
+    public static double supersessionAdvantage(int n, double q) {
+        return structuredSupersessionRecovery(n, q) - similaritySupersessionRecovery(n);
+    }
+
+    /**
+     * Break-even per-edge fidelity where structured recovery equals the uniform
+     * similarity floor: solve {@code q^(n-1) = 1/n} =&gt; {@code q = n^(-1/(n-1))}.
+     * Golden: n=2 -&gt; 0.5; n=4 -&gt; 4^(-1/3) = 0.6299605249474366. Returns 0.0 at n=1
+     * (degenerate: a single version has no edge to traverse).
+     */
+    public static double breakEvenQ(int n) {
+        requireChainLength(n);
+        if (n == 1) {
+            return 0.0;
+        }
+        return Math.pow(n, -1.0 / (n - 1));
+    }
+
+    // ---- domain guards (replicate the Python module invariants) ----
+
+    private static void requireChainLength(int n) {
+        if (n < 1) {
+            throw new IllegalArgumentException("chain length n must be >= 1: " + n);
+        }
+    }
+
+    private static void requireFidelity(double q) {
+        if (!(q > 0.0) || q > 1.0) {
+            throw new IllegalArgumentException("fidelity q must be in (0,1]: " + q);
+        }
+    }
 }
