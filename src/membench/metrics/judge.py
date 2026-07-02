@@ -39,6 +39,21 @@ This module implements that protocol:
 
 The paper does not publish a numeric judge-vs-rule agreement value, so no paper
 constant is asserted here; the machinery exists so a rerun can report one.
+
+Offline default vs. live backend::
+
+    judge = StubComplianceJudge()                  # deterministic, no keys
+    result = judge_task(judge, response_text, task)
+
+    judge = LLMComplianceJudge(model_key="claude")  # live: built on first .judge()
+    check = grader_agreement(judge, [(response_text, task), ...])
+
+Related modules: :mod:`membench.metrics.compliance` (the mechanical rule-based
+scorer this judge is validated against), :mod:`membench.metrics.agreement`
+(multi-rater Fleiss/Krippendorff; :func:`judge_rule_agreement` is the fixed
+two-rater Cohen specialisation), :mod:`membench.metrics.factorization` (the
+downstream :math:`\kappa = P_{comply}/P_{ret}` factorization that consumes
+judged compliance).
 """
 
 from __future__ import annotations
