@@ -313,6 +313,106 @@ public final class DecisionGraph {
         return Math.pow(n, -1.0 / (n - 1));
     }
 
+    // ------------------------------------------------------------------
+    // Scatter penalty law (eq:scatter / Thm thm:scatter; theory/scatter.py)
+    //
+    // A decision shredded across sigma areas must be re-assembled from sigma
+    // probes; assembly succeeds with probability p^sigma. A typed dereference
+    // collapses sigma to 1 (one link, one probe). Flat similarity over a depth-d
+    // chain pays sigma = d.
+    // ------------------------------------------------------------------
+
+    /**
+     * Similarity recovery ceiling (eq:simceiling / Thm thm:sim, theory/recovery.py):
+     * {@code P_sim(d) = s0^d * rho^(d(d+1)/2)} with triangular exponent
+     * {@code T = d(d+1)/2}. Super-geometric decay in causal-hop distance {@code d}.
+     * Golden (s0=0.8, rho=0.5, d=2): 0.8^2 * 0.5^3 = 0.64 * 0.125 = 0.08.
+     */
+    public static double similarityRecovery(int d, double s0, double rho) {
+        requireDepth(d);
+        requirePositive(s0, "s0");
+        requirePositive(rho, "rho");
+        long t = (long) d * (d + 1) / 2;
+        return Math.pow(s0, d) * Math.pow(rho, t);
+    }
+
+    /**
+     * Scatter factor {@code p^sigma}, p in (0,1], sigma &gt;= 0 (fractional allowed).
+     * {@code p^0 = 1} (typed dereference, no scatter), {@code p^1 = p}.
+     * Golden: scatterFactor(0.5, 3) = 0.5^3 = 0.125.
+     */
+    public static double scatterFactor(double p, double sigma) {
+        requireProbability(p);
+        requireScatter(sigma);
+        return Math.pow(p, sigma);
+    }
+
+    /**
+     * Composed scattered recovery {@code P_sim(d) * p^sigma}.
+     * Golden (s0=0.8, rho=0.5, d=2, p=0.5, sigma=2): 0.08 * 0.25 = 0.02.
+     */
+    public static double scatteredRecovery(int d, double s0, double rho, double p, double sigma) {
+        return similarityRecovery(d, s0, rho) * scatterFactor(p, sigma);
+    }
+
+    /**
+     * Degrade a base recovery probability by a scatter factor: {@code base * p^sigma}.
+     * Golden: degradeRecovery(0.5, 0.8, 3) = 0.5 * 0.8^3 = 0.5 * 0.512 = 0.256.
+     */
+    public static double degradeRecovery(double base, double p, double sigma) {
+        if (base < 0.0 || base > 1.0) {
+            throw new IllegalArgumentException("base must be in [0,1]: " + base);
+        }
+        return base * scatterFactor(p, sigma);
+    }
+
+    /**
+     * The assembly-probability curve {@code [p^0, p^1, ..., p^maxSigma]} over integer
+     * scatter. Golden: factorCurve(0.5, 4) = [1.0, 0.5, 0.25, 0.125, 0.0625].
+     */
+    public static double[] factorCurve(double p, int maxSigma) {
+        requireProbability(p);
+        if (maxSigma < 0) {
+            throw new IllegalArgumentException("maxSigma must be >= 0: " + maxSigma);
+        }
+        double[] curve = new double[maxSigma + 1];
+        for (int s = 0; s <= maxSigma; s++) {
+            curve[s] = Math.pow(p, s);
+        }
+        return curve;
+    }
+
+    /**
+     * Probes a flat-similarity retriever must issue to reassemble a decision scattered
+     * across {@code sigma} areas: one probe per area, so {@code sigma}. A typed
+     * dereference needs exactly 1 ({@link #probesForDereference}). This is the
+     * sigma-vs-1 separation of Thm thm:scatter / sec:corpus.
+     */
+    public static int probesForScatter(int sigma) {
+        if (sigma < 0) {
+            throw new IllegalArgumentException("sigma must be >= 0: " + sigma);
+        }
+        return sigma;
+    }
+
+    /** A typed dereference collapses scatter to a single probe (sigma -&gt; 1). */
+    public static int probesForDereference() {
+        return 1;
+    }
+
+    /**
+     * Information-theoretic probe lower bound from Thm thm:scatentropy:
+     * {@code probes >= sigma / p_bar}, i.e. {@code ceil(sigma / p_bar)} whole probes
+     * when each probe recovers a fraction {@code p_bar} of the scattered locations.
+     */
+    public static int probesLowerBound(int sigma, double pBar) {
+        if (sigma < 0) {
+            throw new IllegalArgumentException("sigma must be >= 0: " + sigma);
+        }
+        requireProbability(pBar);
+        return (int) Math.ceil(sigma / pBar);
+    }
+
     // ---- domain guards (replicate the Python module invariants) ----
 
     private static void requireChainLength(int n) {
@@ -324,6 +424,30 @@ public final class DecisionGraph {
     private static void requireFidelity(double q) {
         if (!(q > 0.0) || q > 1.0) {
             throw new IllegalArgumentException("fidelity q must be in (0,1]: " + q);
+        }
+    }
+
+    private static void requireDepth(int d) {
+        if (d < 1) {
+            throw new IllegalArgumentException("depth d must be >= 1: " + d);
+        }
+    }
+
+    private static void requireProbability(double p) {
+        if (!(p > 0.0) || p > 1.0) {
+            throw new IllegalArgumentException("probability must be in (0,1]: " + p);
+        }
+    }
+
+    private static void requireScatter(double sigma) {
+        if (!(sigma >= 0.0)) {
+            throw new IllegalArgumentException("sigma must be >= 0: " + sigma);
+        }
+    }
+
+    private static void requirePositive(double v, String name) {
+        if (!(v > 0.0)) {
+            throw new IllegalArgumentException(name + " must be > 0: " + v);
         }
     }
 }
