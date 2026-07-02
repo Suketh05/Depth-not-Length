@@ -223,3 +223,26 @@ assert_close(ss_resid, 2.0, 1e-12, "PAVA:SS_resid=2.0")
 assert_close(r2_iso, 2 / 7, 1e-12, "PAVA:R2_iso=2/7")
 cat(sprintf("PASS (3) PAVA isotonic: up=[%s] dn=[%s] R2_iso=%.16g\n",
             paste(iso_up, collapse = ","), paste(iso_dn, collapse = ","), r2_iso))
+
+## ---------------------------------------------------------------------------
+## (4) Wilson score interval + Cohen's h
+##     Cross-checks src/membench/metrics/factorization.py::wilson_interval and
+##     src/membench/stats/effect_size.py; golden pack C.6 and C.7.
+##     Wilson score CI (clamped to [0,1]):
+##       center = (p_hat + z^2/2n) / (1 + z^2/n)
+##       margin = z*sqrt(p_hat(1-p_hat)/n + z^2/4n^2) / (1 + z^2/n)
+##       z = qnorm(1 - (1-conf)/2)  (95% -> 1.959963984540054)
+##     Cohen's h (arcsine-transformed proportion effect size):
+##       h = 2*asin(sqrt(p1)) - 2*asin(sqrt(p2))
+## ---------------------------------------------------------------------------
+wilson_interval <- function(successes, trials, conf = 0.95) {
+  z <- qnorm(1 - (1 - conf) / 2)
+  p_hat <- successes / trials
+  denom <- 1 + z^2 / trials
+  center <- (p_hat + z^2 / (2 * trials)) / denom
+  margin <- (z * sqrt(p_hat * (1 - p_hat) / trials + z^2 / (4 * trials^2))) / denom
+  list(low = max(0, center - margin), high = min(1, center + margin),
+       center = center, margin = margin)
+}
+
+cohen_h <- function(p1, p2) 2 * asin(sqrt(p1)) - 2 * asin(sqrt(p2))
