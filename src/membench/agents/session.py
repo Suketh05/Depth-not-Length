@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 __all__ = [
+    "Session",
     "TurnRecord",
 ]
 
@@ -81,3 +82,113 @@ class TurnRecord:
     def turn_tokens(self) -> int:
         """Total tokens billed for this turn (prompt + completion)."""
         return self.prompt_tokens + self.completion_tokens
+
+
+@dataclass(frozen=True, slots=True)
+class Session:
+    """A complete multi-turn trajectory of one (task, arm, model) configuration.
+
+    This is the row unit of the paper's token-economics sweep
+    (``sec:tokecon``): one session per (backend LLM x task x context layer)
+    cell, whose *session tokens* decide each matchup of
+    ``tab:tok_context_winrate`` and whose outcome column
+    ("*k* turns, resolved/unresolved") is exactly
+    (:attr:`n_turns`, :attr:`resolved`) in ``tab:tok_agent_context_gpt55``.
+
+    Invariants (enforced):
+
+    * turns are numbered contiguously ``1..n`` in order;
+    * a session stops at its first resolved turn, so ``resolved=True`` may
+      appear only on the final turn — hence the *convergence turn*, when it
+      exists, is the last turn.
+
+    An empty ``turns`` tuple is permitted (the vacuous session): all token and
+    dollar sums are ``0`` and there is no convergence turn, mirroring the
+    empty-sum convention used across the metrics layer.
+
+    Parameters
+    ----------
+    task_id, dataset, arm, model
+        Attribution keys, identical in meaning to
+        :class:`membench.agents.runner.AttemptRecord`.
+    turns
+        The per-turn ledger, in turn order.
+    max_turns
+        The turn cap the driver ran under (a session that reaches it without
+        resolving is the paper's "*k* turns, unresolved" outcome).
+    retrieved_ids, governing_decisions
+        Provenance of the turn-1 context injection (context is injected once on
+        turn 1, per ``sec:tokecon``), kept so retrieval and compliance scoring
+        remain possible on session rows.
+    """
+
+    task_id: str
+    dataset: str
+    arm: str
+    model: str
+    turns: tuple[TurnRecord, ...]
+    max_turns: int
+    retrieved_ids: tuple[str, ...] = ()
+    governing_decisions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "turns", tuple(self.turns))
+        object.__setattr__(self, "retrieved_ids", tuple(self.retrieved_ids))
+        object.__setattr__(self, "governing_decisions", tuple(self.governing_decisions))
+        if self.max_turns < 0:
+            raise ValueError(f"max_turns must be non-negative, got {self.max_turns}")
+        if len(self.turns) > self.max_turns:
+            raise ValueError(
+                f"session has {len(self.turns)} turns but max_turns={self.max_turns}"
+            )
+        for position, record in enumerate(self.turns, start=1):
+            if record.turn != position:
+                raise ValueError(
+                    f"turns must be numbered contiguously from 1; "
+                    f"expected turn {position}, got {record.turn}"
+                )
+            if record.resolved and position != len(self.turns):
+                raise ValueError(
+                    f"turn {position} is resolved but is not the final turn; "
+                    "a session stops at its first resolved turn"
+                )
+
+    @property
+    def n_turns(self) -> int:
+        """Number of turns the session ran (the paper's outcome-column turn count)."""
+        return len(self.turns)
+
+    @property
+    def resolved(self) -> bool:
+        """Whether the session ended in resolution (final turn passed the predicate)."""
+        return bool(self.turns) and self.turns[-1].resolved
+
+    @property
+    def convergence_turn(self) -> int | None:
+        """The 1-based turn at which the task resolved, or ``None`` if it never did.
+
+        By the stop-at-first-resolution invariant this is always the final turn
+        when it exists — e.g. the paper's "Brief context ... 3 turns, resolved"
+        row (``tab:tok_agent_context_gpt55``) has convergence turn 3.
+        """
+        return self.n_turns if self.resolved else None
+
+    @property
+    def prompt_tokens(self) -> int:
+        """Total prompt tokens across all turns."""
+        return sum(record.prompt_tokens for record in self.turns)
+
+    @property
+    def completion_tokens(self) -> int:
+        """Total completion tokens across all turns."""
+        return sum(record.completion_tokens for record in self.turns)
+
+    @property
+    def session_tokens(self) -> int:
+        """Total session token spend — the matchup currency of ``tab:tok_context_winrate``."""
+        return sum(record.turn_tokens for record in self.turns)
+
+    @property
+    def session_dollars(self) -> float:
+        """Total session cost in dollars (sum of the per-turn costs)."""
+        return sum(record.dollars for record in self.turns)
