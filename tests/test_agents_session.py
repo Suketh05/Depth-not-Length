@@ -19,7 +19,12 @@ from membench.agents.llm.pricing import (
     UNPRICED_SWEEP_MODELS,
     blended_session_dollars,
 )
-from membench.agents.session import PaperLedgerRow, tokens_per_resolved_point
+from membench.agents.session import (
+    PaperLedgerRow,
+    matchup_winner,
+    tokens_per_resolved_point,
+    win_rate,
+)
 
 # ---------------------------------------------------------------------------
 # tab:tok_agent_context_gpt55 — "Multi-turn collapse, one fixed backend model
@@ -188,3 +193,76 @@ class TestPaperSessionRates:
             "llama-4-maverick",
             "stub",
         }
+
+
+# ---------------------------------------------------------------------------
+# tab:tok_context_winrate + tab:tok_context_by_competitor — the 3600-matchup
+# session-token tournament. Rows: layer, matchups, Brief wins, Brief losses,
+# printed win %. All numbers verbatim from the paper tables.
+# ---------------------------------------------------------------------------
+WINRATE_ROWS: list[tuple[str, int, int, int, float]] = [
+    ("Mem0", 360, 291, 69, 80.8),
+    ("Zep", 360, 279, 81, 77.5),
+    ("ContextQ", 360, 282, 78, 78.3),
+    ("Oracle Summary", 360, 312, 48, 86.7),
+    ("Supermemory", 360, 288, 72, 80.0),
+    ("Unabyss", 360, 303, 57, 84.2),
+    ("Driver", 360, 296, 64, 82.2),
+    ("Oiya", 360, 247, 113, 68.6),
+    ("Kluris", 360, 302, 58, 83.9),
+    ("none", 360, 280, 80, 77.8),
+]
+
+
+class TestWinRateGoldens:
+    """The tournament arithmetic of tab:tok_context_winrate, checked exactly."""
+
+    def test_headline_win_rate_is_exactly_four_fifths(self) -> None:
+        # 2880 / 3600 = 4/5 = 0.8 exactly (an exact dyadic float, so ==):
+        # "Brief is cheaper in 80.0% of matchups"; losses 720/3600 = 0.2; 0 ties.
+        assert win_rate(2880, 3600) == 0.8
+        assert win_rate(720, 3600) == 0.2
+        assert 2880 + 720 == 3600
+
+    def test_matchup_count_factorises(self) -> None:
+        # Matchups = 12 LLMs x 30 SWE agent tasks x 10 context layers = 3600.
+        assert 12 * 30 * 10 == 3600
+
+    def test_per_competitor_rows_sum_to_the_headline(self) -> None:
+        assert sum(row[1] for row in WINRATE_ROWS) == 3600
+        assert sum(row[2] for row in WINRATE_ROWS) == 2880
+        assert sum(row[3] for row in WINRATE_ROWS) == 720
+
+    @pytest.mark.parametrize(
+        ("layer", "matchups", "wins", "losses", "pct"), WINRATE_ROWS
+    )
+    def test_per_competitor_percentages(
+        self, layer: str, matchups: int, wins: int, losses: int, pct: float
+    ) -> None:
+        # Printed win % is the 1-dp rounding of wins/matchups; wins and losses
+        # partition the 360 matchups (0 ties). E.g. Mem0: 291/360 = 80.83 -> 80.8.
+        assert wins + losses == matchups
+        assert round(100.0 * win_rate(wins, matchups), 1) == pct
+
+    def test_range_endpoints_match_prose(self) -> None:
+        # sec:tokecon: "from a 68.6% rate against Oiya to 86.7% against Oracle
+        # Summary, and 77.8% even against ... no context layer at all."
+        percentages = {row[0]: row[4] for row in WINRATE_ROWS}
+        assert min(percentages.values()) == percentages["Oiya"] == 68.6
+        assert max(percentages.values()) == percentages["Oracle Summary"] == 86.7
+        assert percentages["none"] == 77.8
+
+    def test_matchup_winner_rule(self) -> None:
+        # Winner = strictly fewer session tokens; ties representable but the
+        # paper's sweep recorded zero.
+        assert matchup_winner(1835, 4737) == "brief"
+        assert matchup_winner(1938, 1593) == "competitor"  # a real loss row
+        assert matchup_winner(1000, 1000) is None
+        with pytest.raises(ValueError, match="non-negative"):
+            matchup_winner(-1, 10)
+
+    def test_win_rate_domain(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            win_rate(1, 0)
+        with pytest.raises(ValueError, match="wins"):
+            win_rate(361, 360)
