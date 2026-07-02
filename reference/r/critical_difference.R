@@ -146,3 +146,19 @@ tost_two_means <- function(mean_a, sd_a, n_a, mean_b, sd_b, n_b, delta) {
        p_lower = p_lower, p_upper = p_upper,
        p_value = max(p_lower, p_upper))
 }
+
+# Golden pack C.1: a=(10.0, sd 2, n 50), b=(10.5, sd 2, n 50), delta=1, alpha=0.05.
+# diff=-0.5, SE=0.40, df collapses to 2(n-1)=98; t_lower=1.25, t_upper=-3.75.
+# p_value=P(T98>1.25)=0.10713816216177832 > 0.05 => NOT equivalent (correct verdict).
+tost <- tost_two_means(10.0, 2.0, 50, 10.5, 2.0, 50, delta = 1.0)
+assert_close(tost$diff,    -0.5,                    1e-12, "TOST:diff")
+assert_close(tost$se,       0.40,                   1e-12, "TOST:SE")
+assert_close(tost$df,       98,                     1e-9,  "TOST:df=98")
+assert_close(tost$t_lower,  1.25,                   1e-12, "TOST:t_lower=1.25")
+assert_close(tost$t_upper, -3.75,                   1e-12, "TOST:t_upper=-3.75")
+assert_close(tost$p_lower,  0.10713816216177832,    1e-12, "TOST:p_lower")
+assert_close(tost$p_upper,  0.00014966157362142826, 1e-12, "TOST:p_upper")
+assert_close(tost$p_value,  0.10713816216177832,    1e-12, "TOST:p_value")
+assert_true(tost$p_value >= 0.05, "TOST:not-equivalent (p>=alpha)")
+cat(sprintf("PASS (2) Schuirmann TOST: t_lower=%.2f t_upper=%.2f df=%g p=%.17g (not equivalent)\n",
+            tost$t_lower, tost$t_upper, tost$df, tost$p_value))
