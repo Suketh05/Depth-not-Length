@@ -264,6 +264,21 @@ public final class DecisionGraph {
 
     // ==================================================================
     // THEORY KERNELS (closed forms only; goldens live in the golden pack).
+    //
+    // Golden cross-check map (a reviewer can verify each identity by hand):
+    //   edgeHops(n)                       n-1                         pack A.7
+    //   structuredSupersessionRecovery    q^(n-1)   n=4,q=.9 -> .729  pack A.7
+    //   similaritySupersessionRecovery    1/n       n=4 -> .25        pack A.7
+    //   supersessionAdvantage             q^(n-1)-1/n  n=2,q=.95->.45 pack A.7
+    //   breakEvenQ(n)                     n^(-1/(n-1)) n=4 -> .62996.. pack A.7
+    //   structuredRecovery(d,q)           q^d       d=3,q=.97->.912673 pack A.2
+    //   similarityRecovery(d,s0,rho)      s0^d*rho^(d(d+1)/2)  ->.08   pack A.5/A.1
+    //   scatterFactor(p,sigma)            p^sigma   0.5^3 -> .125      pack A.5
+    //   scatteredRecovery                 P_sim(d)*p^sigma -> .02      pack A.5
+    //   degradeRecovery(base,p,sigma)     base*p^sigma -> .256         pack A.5
+    //   factorCurve(0.5,4)                [1,.5,.25,.125,.0625]        pack A.5
+    // Measured/fitted numbers (92.3% supersession, p=0.92, matched-token counts)
+    // are intentionally NOT encoded here — closed forms only, as the Python modules do.
     // ==================================================================
 
     /** Number of supersedes edges in a chain of {@code n} versions: {@code n-1}. */
