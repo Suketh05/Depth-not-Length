@@ -16,11 +16,13 @@ run there. Stable-tie inputs are used so descending-order comparisons are unambi
 from __future__ import annotations
 
 import importlib.util
+import math
 
 import numpy as np
 import pytest
 
 from membench.retrieval._native import cosine_topk_reference
+from membench.theory.crossover import find_crossover_depth
 from membench.theory.crossover import g as py_gap
 from membench.theory.decay import SimilarityDecayModel
 from membench.theory.recovery import (
@@ -102,3 +104,34 @@ def test_rust_recovery_gap_matches_python(d: float) -> None:
     model = RecoveryModel(decay=SimilarityDecayModel(s0=_PAPER_S0, rho=_PAPER_RHO), q=_PAPER_Q)
     got = membench_kernels.recovery_gap(d, _PAPER_S0, _PAPER_RHO, _PAPER_Q)
     assert got == pytest.approx(py_gap(d, model), abs=1e-12, rel=0)
+
+
+# ---------------------------------------------------------------------------
+# verify.rs parity: crossover_search (crossover.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tau", [0.0, 0.3, 0.501, 0.6, 0.7935, 0.85, 2.0])
+def test_rust_crossover_search_matches_python(tau: float) -> None:
+    import membench_kernels
+
+    model = RecoveryModel(decay=SimilarityDecayModel(s0=_PAPER_S0, rho=_PAPER_RHO), q=_PAPER_Q)
+    ref = find_crossover_depth(model, tau, max_depth=64)
+    exists, d_star, d_cont, win_lo, win_hi, peak, g_curve = membench_kernels.crossover_search(
+        _PAPER_S0, _PAPER_RHO, _PAPER_Q, tau, 64
+    )
+
+    assert exists == ref.exists
+    assert peak == ref.peak_depth
+    np.testing.assert_allclose(np.asarray(g_curve), ref.g_curve, atol=1e-12, rtol=0)
+
+    if not ref.exists:
+        assert d_star == -1
+        assert math.isnan(d_cont)
+        assert (win_lo, win_hi) == (-1, -1)
+        return
+
+    assert d_star == ref.d_star
+    assert (win_lo, win_hi) == ref.win_region
+    # Rust bisection vs SciPy Brent: same simple root of g(d) - tau, ~1e-9.
+    assert d_cont == pytest.approx(ref.d_star_continuous, abs=1e-9, rel=0)
