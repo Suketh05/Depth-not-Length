@@ -261,3 +261,23 @@ SELECT CASE WHEN (
   SELECT COUNT(*) FROM walk WHERE node IN ('dx-iso-1', 'dx-iso-2')
 ) = 0 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 4 -- Super-geometric similarity decay along the depth-3 chain.
+--   Anchors: eq:simceiling / thm:sim  P_ret^sim(d) = s0^d * rho^(d(d+1)/2);
+--   eq:perhop (per-hop product). Synthetic operating point s0=0.70, rho=0.67.
+-- ---------------------------------------------------------------------------
+-- Recursive per-hop product of the survival factors s_k = s0 * rho^k over the
+-- 3-hop governing chain (carrying rho^k incrementally, no POWER() dependency).
+-- Golden A.1 (VERBATIM): P_sim(3) = 0.031027225083967002. abs tol 1e-12.
+CREATE TABLE _assert_psim_d3 (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_psim_d3
+SELECT CASE WHEN ABS((
+  WITH RECURSIVE hop(k, rho_pow, cum_p) AS (
+      SELECT 1, 0.67, 0.70 * 0.67
+    UNION ALL
+      SELECT k + 1, rho_pow * 0.67, cum_p * (0.70 * (rho_pow * 0.67))
+      FROM hop WHERE k < 3
+  )
+  SELECT cum_p FROM hop WHERE k = 3
+) - 0.031027225083967002) <= 1e-12 THEN 1 ELSE 0 END;
+
