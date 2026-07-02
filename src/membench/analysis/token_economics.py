@@ -59,6 +59,7 @@ __all__ = [
     "WinRate",
     "build_matchups",
     "tally",
+    "tally_by_competitor",
 ]
 
 #: The context-layer name reserved for the typed decision-graph store under test.
@@ -319,3 +320,43 @@ def tally(matchups: Iterable[Matchup]) -> WinRate:
         else:
             ties += 1
     return WinRate(wins=wins, losses=losses, ties=ties)
+
+
+def tally_by_competitor(matchups: Iterable[Matchup]) -> dict[str, WinRate]:
+    """Break the win rate out per competing context layer.
+
+    Implements ``tab:tok_context_by_competitor`` / ``fig:tokwinrate`` (F105): the
+    same matchups of :func:`tally`, resolved separately for each competitor
+    (``360`` matchups each in the full sweep), yielding the ``68.6%``--``86.7%``
+    band.
+
+    Parameters
+    ----------
+    matchups
+        The matchups to aggregate.
+
+    Returns
+    -------
+    dict of str to WinRate
+        One :class:`WinRate` per competitor, keys sorted by competitor name.
+    """
+    wins: dict[str, int] = defaultdict(int)
+    losses: dict[str, int] = defaultdict(int)
+    ties: dict[str, int] = defaultdict(int)
+    for matchup in matchups:
+        outcome = matchup.outcome
+        if outcome is MatchupOutcome.BRIEF_CHEAPER:
+            wins[matchup.competitor] += 1
+        elif outcome is MatchupOutcome.COMPETITOR_CHEAPER:
+            losses[matchup.competitor] += 1
+        else:
+            ties[matchup.competitor] += 1
+    competitors = sorted(wins.keys() | losses.keys() | ties.keys())
+    return {
+        competitor: WinRate(
+            wins=wins[competitor],
+            losses=losses[competitor],
+            ties=ties[competitor],
+        )
+        for competitor in competitors
+    }
