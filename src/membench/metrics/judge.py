@@ -45,10 +45,11 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from membench.metrics.compliance import decision_keywords
+from membench.metrics.compliance import decision_keywords, score_compliance
 from membench.types import Task
 
 if TYPE_CHECKING:  # imported lazily at runtime: the offline pipeline never needs it
@@ -57,6 +58,7 @@ if TYPE_CHECKING:  # imported lazily at runtime: the offline pipeline never need
 __all__ = [
     "PROMPT_ORDERS",
     "ComplianceJudge",
+    "GraderAgreement",
     "LLMComplianceJudge",
     "JudgeCase",
     "JudgeConfig",
@@ -65,6 +67,8 @@ __all__ = [
     "StubComplianceJudge",
     "TaskJudgeResult",
     "build_judge_prompt",
+    "grader_agreement",
+    "judge_rule_agreement",
     "judge_task",
     "parse_judge_verdict",
 ]
@@ -607,3 +611,123 @@ class LLMComplianceJudge(ComplianceJudge):
         system, user = build_judge_prompt(case, self._config)
         response = client.complete(system, user, max_tokens=self._config.max_tokens)
         return parse_judge_verdict(response.text, self._config)
+
+
+@dataclass(frozen=True, slots=True)
+class GraderAgreement:
+    """Judge-vs-rule-based agreement over matched (task, decision) units.
+
+    The grader-validity summary of Section ``sec:gradervalidity``: how often the
+    outcome-level judge and the mechanical identifier-overlap scorer
+    (:mod:`membench.metrics.compliance`) return the same boolean on the same
+    units, plus Cohen's kappa to correct raw agreement for chance (two fixed
+    raters -- the 2-rater specialisation of the Fleiss statistic in
+    :mod:`membench.metrics.agreement`).
+
+    Parameters
+    ----------
+    n
+        Number of matched units compared.
+    n_agree
+        Units where both graders returned the same boolean.
+    agreement_rate
+        ``n_agree / n`` (observed agreement, :math:`p_o`).
+    cohen_kappa
+        :math:`(p_o - p_e) / (1 - p_e)` with :math:`p_e = p_J p_R +
+        (1-p_J)(1-p_R)`; ``1.0`` is perfect, ``0.0`` chance-level. Defined as
+        ``1.0`` at perfect agreement (which subsumes the degenerate
+        :math:`p_e = 1` case, only reachable when :math:`p_o = 1`).
+    judge_positive_rate
+        Fraction of units the judge graded compliant (:math:`p_J`).
+    rule_positive_rate
+        Fraction of units the rule-based scorer graded compliant (:math:`p_R`).
+    """
+
+    n: int
+    n_agree: int
+    agreement_rate: float
+    cohen_kappa: float
+    judge_positive_rate: float
+    rule_positive_rate: float
+
+
+def judge_rule_agreement(
+    judge_flags: Sequence[bool], rule_flags: Sequence[bool]
+) -> GraderAgreement:
+    r"""Agreement rate and Cohen's kappa between judge and rule-based verdicts.
+
+    Standard two-rater Cohen (1960) kappa on aligned boolean verdict vectors:
+
+    .. math::
+
+        p_o = \frac{\#\{i : J_i = R_i\}}{n},\qquad
+        p_e = p_J p_R + (1-p_J)(1-p_R),\qquad
+        \kappa = \frac{p_o - p_e}{1 - p_e}
+
+    where :math:`p_J, p_R` are the two raters' compliant-rates. Perfect agreement
+    returns :math:`\kappa = 1` directly (this also covers the :math:`p_e = 1`
+    degeneracy: :math:`p_e = 1` forces both marginals onto the same constant
+    label, hence :math:`p_o = 1`). This quantifies the construct gap Section
+    ``sec:gradervalidity`` worries about -- the judge measuring "honoring the
+    decision" vs. the rule scorer's surface identifier overlap.
+
+    Raises
+    ------
+    ValueError
+        If the vectors are empty (agreement undefined; a chance-agreement floor
+        must never be invented from zero evidence) or of different lengths.
+    """
+    if len(judge_flags) != len(rule_flags):
+        raise ValueError(
+            f"verdict vectors must align: {len(judge_flags)} judge vs {len(rule_flags)} rule"
+        )
+    n = len(judge_flags)
+    if n == 0:
+        raise ValueError("agreement is undefined on zero units")
+
+    n_agree = sum(1 for j, r in zip(judge_flags, rule_flags) if bool(j) == bool(r))
+    p_o = n_agree / n
+    p_judge = sum(map(bool, judge_flags)) / n
+    p_rule = sum(map(bool, rule_flags)) / n
+    p_e = p_judge * p_rule + (1.0 - p_judge) * (1.0 - p_rule)
+    kappa = 1.0 if p_o == 1.0 else (p_o - p_e) / (1.0 - p_e)
+    return GraderAgreement(
+        n=n,
+        n_agree=n_agree,
+        agreement_rate=p_o,
+        cohen_kappa=kappa,
+        judge_positive_rate=p_judge,
+        rule_positive_rate=p_rule,
+    )
+
+
+def grader_agreement(
+    judge: ComplianceJudge, graded: Sequence[tuple[str, Task]]
+) -> GraderAgreement:
+    """Run judge and rule-based scorer over (response, task) pairs and compare.
+
+    The comparison unit is one (task, governing decision) pair: the judge grades
+    it via :func:`judge_task` and the rule-based scorer via
+    :func:`membench.metrics.compliance.score_compliance` on the identical
+    response, corpus, and gold ids. Tasks with no governing decisions are skipped
+    (both graders define them as vacuously compliant, so counting them would
+    inflate agreement with units that grade nothing).
+
+    Raises
+    ------
+    ValueError
+        If no (task, decision) units remain after skipping vacuous tasks.
+    """
+    judge_flags: list[bool] = []
+    rule_flags: list[bool] = []
+    for response_text, task in graded:
+        if not task.governing_decisions:
+            continue
+        judged = judge_task(judge, response_text, task)
+        ruled = score_compliance(response_text, task.governing_decisions, task.corpus_by_id)
+        judged_ids = set(judged.compliant_ids)
+        ruled_ids = set(ruled.honored_ids)
+        for decision_id in task.governing_decisions:
+            judge_flags.append(decision_id in judged_ids)
+            rule_flags.append(decision_id in ruled_ids)
+    return judge_rule_agreement(judge_flags, rule_flags)
