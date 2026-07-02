@@ -147,3 +147,21 @@ INSERT INTO entity_objects (id, entity_type, entity_id, kind, canonical_type, ti
   ('d-gov-3-e', 'decision', 'D-1003E', 'source', 'decision', 'Edgeless copy of d-gov-3 (unreachable without links)', 0, 0);
 -- (No entity_link rows for the *-e nodes: the discrete-no-links condition.)
 
+-- ---------------------------------------------------------------------------
+-- SEED (supersession) -- three near-identical decision versions + supersedes chain.
+-- ---------------------------------------------------------------------------
+-- A decision revised twice: s1 (oldest) <- s2 <- s3 (current). Edge convention:
+-- the NEWER decision `supersedes` the older, so source=newer, target=older; the
+-- head (current) is the version that is never a target. citation_count is a
+-- similarity/centrality proxy: the STALE original s1 is the most-cited, so an
+-- embedding/frequency retriever ranks it first -- the exact failure tab:super
+-- measures (similarity 64-69% current-ranked-first vs typed 92.3%). n=3 versions
+-- => n-1 = 2 supersedes edges (golden A.7 edge_hops).
+INSERT INTO entity_objects (id, entity_type, entity_id, kind, canonical_type, title, access_count, citation_count) VALUES
+  ('s-sess-1', 'decision', 'D-500', 'source', 'decision', 'Session TTL = 30 minutes',           40, 40),
+  ('s-sess-2', 'decision', 'D-501', 'source', 'decision', 'Session TTL = 60 minutes',           14, 12),
+  ('s-sess-3', 'decision', 'D-502', 'source', 'decision', 'Session TTL = 15 minutes (current)',  6,  3);
+INSERT INTO entity_link (id, source_entity_object_id, target_entity_object_id, relationship_type, status, confidence, match_method) VALUES
+  ('e-sup-1', 's-sess-2', 's-sess-1', 'supersedes', 'confirmed', 1.0, 'explicit'),
+  ('e-sup-2', 's-sess-3', 's-sess-2', 'supersedes', 'confirmed', 1.0, 'explicit');
+
