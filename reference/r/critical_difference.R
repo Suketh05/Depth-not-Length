@@ -246,3 +246,24 @@ wilson_interval <- function(successes, trials, conf = 0.95) {
 }
 
 cohen_h <- function(p1, p2) 2 * asin(sqrt(p1)) - 2 * asin(sqrt(p2))
+
+# Golden pack C.6: (8 successes, 10 trials) 95% Wilson.
+w1 <- wilson_interval(8, 10)
+assert_close(w1$center, 0.7167401600411333,  1e-12, "Wilson(8,10):center")
+assert_close(w1$margin, 0.22657768850449148, 1e-12, "Wilson(8,10):margin")
+assert_close(w1$low,    0.49016247153664183, 1e-12, "Wilson(8,10):low")
+assert_close(w1$high,   0.9433178485456247,  1e-12, "Wilson(8,10):high")
+# (6 successes, 8 trials) -- the pooled-kappa CI case (p_hat=0.75).
+w2 <- wilson_interval(6, 8)
+assert_close(w2$center, 0.6688981087790299,  1e-12, "Wilson(6,8):center")
+assert_close(w2$margin, 0.25962267846886106, 1e-12, "Wilson(6,8):margin")
+assert_close(w2$low,    0.40927543031016883, 1e-12, "Wilson(6,8):low")
+assert_close(w2$high,   0.9285207872478909,  1e-12, "Wilson(6,8):high")
+
+# Golden pack C.7: Cohen's h cases (test-file + paper worked examples).
+assert_close(cohen_h(0.9,   0.5),   0.9272952180016121,  1e-12, "CohenH(0.9,0.5)")
+assert_close(cohen_h(0.933, 0.858), 0.24909123063156624, 1e-12, "CohenH(0.933,0.858)")
+assert_close(cohen_h(0.875, 0.800), 0.20456097018819674, 1e-12, "CohenH(0.875,0.800)")
+assert_close(cohen_h(0.5,   0.5),   0.0,                 1e-12, "CohenH(0.5,0.5)=0")
+cat(sprintf("PASS (4) Wilson+Cohen h: (8,10)=(%.15g,%.15g) (6,8)=(%.15g,%.15g) h(.9,.5)=%.16g\n",
+            w1$low, w1$high, w2$low, w2$high, cohen_h(0.9, 0.5)))
