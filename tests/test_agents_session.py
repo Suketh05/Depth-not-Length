@@ -12,7 +12,66 @@ from __future__ import annotations
 
 import pytest
 
+from membench.agents.llm.pricing import session_blended_cost
 from membench.agents.session import Session, TurnLedger
+
+
+def _usd_tol(decimals: int) -> float:
+    """Half a unit in the last published decimal place (plus float dust)."""
+    return 0.5 * 10 ** (-decimals) + 1e-9
+
+
+# tab:tok_agent_context_gpt55 -- one fixed backend (GPT-5.5). Per-turn columns
+# (T1, T2, T3, T4+ with '---' dropped), the published session total, the published
+# USD and its number of decimals, whether the row resolved, and the convergence
+# turn ONLY for rows where the per-turn columns map 1:1 to turns (i.e. no T4+
+# aggregation). Transcribed verbatim from the paper table.
+# label, per_turn, session_tok, usd, usd_decimals, resolved, convergence
+_GPT55_ROWS: tuple[tuple[str, tuple[int, ...], int, float, int, bool, int | None], ...] = (
+    ("alone (unresolved)", (1403, 698, 601, 1461), 4163, 0.05, 2, False, None),
+    ("alone (best)", (1420, 715, 612, 939), 3686, 0.0442, 4, True, None),
+    ("Brief context", (1598, 203, 34), 1835, 0.022, 3, True, 3),
+    ("Brief context (slow)", (1598, 412, 118, 44), 2172, 0.0261, 4, True, 4),
+    ("Mem0 context (resolved)", (1712, 684, 598, 1743), 4737, 0.0568, 4, True, None),
+    ("Mem0 context (unresolved)", (1708, 691, 605, 2166), 5170, 0.062, 3, False, None),
+    ("ContextQ context", (1648, 612, 541, 926), 3727, 0.0447, 4, False, None),
+    ("Zep context", (1576, 448, 382, 318), 2724, 0.0327, 4, True, 4),
+)
+
+
+class TestPaperTurnLedgerGpt55:
+    """Cross-check every row of tab:tok_agent_context_gpt55."""
+
+    @pytest.mark.parametrize("row", _GPT55_ROWS, ids=[r[0] for r in _GPT55_ROWS])
+    def test_session_tokens_equal_sum_of_per_turn_columns(
+        self, row: tuple[str, tuple[int, ...], int, float, int, bool, int | None]
+    ) -> None:
+        # A reader adding up the paper's per-turn columns must land on the
+        # published "Session tok." cell -- an internal-consistency identity.
+        _label, per_turn, session_tok, *_ = row
+        assert sum(per_turn) == session_tok
+
+    @pytest.mark.parametrize("row", _GPT55_ROWS, ids=[r[0] for r in _GPT55_ROWS])
+    def test_blended_rate_reproduces_published_usd(
+        self, row: tuple[str, tuple[int, ...], int, float, int, bool, int | None]
+    ) -> None:
+        _label, _per_turn, session_tok, usd, decimals, *_ = row
+        computed = session_blended_cost("gpt-5.5", session_tok)
+        assert abs(computed - usd) <= _usd_tol(decimals)
+
+    def test_convergence_turns_for_clean_resolved_rows(self) -> None:
+        # For rows whose per-turn columns map 1:1 to turns, a Session built from
+        # them recovers the outcome column's turn count and resolution.
+        for label, per_turn, _tok, _usd, _d, resolved, convergence in _GPT55_ROWS:
+            if convergence is None:
+                continue
+            turns = tuple(
+                TurnLedger.from_total(i, total, resolved=(i == len(per_turn) and resolved))
+                for i, total in enumerate(per_turn, start=1)
+            )
+            session = Session("gpt-5.5", label, turns)
+            assert session.convergence_turn == convergence, label
+            assert session.num_turns == len(per_turn), label
 
 
 class TestTurnLedger:
