@@ -70,3 +70,35 @@ func TestDepthGapRatio(t *testing.T) {
 	ratio := m.AnalyticPRet(Structured, 3) / m.AnalyticPRet(Similarity, 3)
 	closeTo(t, "q^3/P_sim(3)", ratio, 29.415231221293272, 1e-9)
 }
+
+// simTrials / simSeed / simWorkers are the fixed Monte-Carlo settings shared by
+// the empirical tests. The seed is fixed so the (otherwise probabilistic)
+// 3-sigma assertion is deterministic and reproducible in CI; N=200k is the size
+// the task specifies. seed=7's worst cell lands at ~1.6 sigma, comfortably
+// inside the 3-sigma band.
+const (
+	simTrials  = 200000
+	simSeed    = uint64(7)
+	simWorkers = 8
+)
+
+// TestEmpiricalMatchesAnalyticWithin3SE is the core evidence that the closed-form
+// theory (eq:simceiling, thm:struct) describes the generative model: with 200k
+// seeded trials the empirical P_ret(d) lands within 3 binomial standard errors of
+// the analytic value for BOTH arms at every depth 1..5. The SE is computed here
+// as sqrt(p*(1-p)/N) on the analytic p (the estimator's true standard error).
+func TestEmpiricalMatchesAnalyticWithin3SE(t *testing.T) {
+	m := PaperCalibration
+	for d := 1; d <= 5; d++ {
+		for _, a := range []Arm{Similarity, Structured} {
+			est := m.SimulatePRet(a, d, simTrials, simWorkers, simSeed)
+			analytic := m.AnalyticPRet(a, d)
+			se := math.Sqrt(analytic * (1 - analytic) / float64(simTrials))
+			dev := math.Abs(est.PHat() - analytic)
+			if dev > 3*se {
+				t.Errorf("%s d=%d: empirical=%.6g analytic=%.6g |dev|=%.3g > 3*SE=%.3g (%.2f sigma)",
+					a, d, est.PHat(), analytic, dev, 3*se, dev/se)
+			}
+		}
+	}
+}
