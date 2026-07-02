@@ -38,6 +38,7 @@ module -- the paper flags it as needed-before-earned future work.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -56,7 +57,9 @@ __all__ = [
     "PromptOrder",
     "StubJudge",
     "agreement_rate",
+    "build_judge_prompt",
     "judge_vs_rule_agreement",
+    "parse_verdict",
 ]
 
 # The answer models in the paper are Claude (Sonnet) and GPT-5.1 (Section
@@ -485,3 +488,125 @@ def judge_vs_rule_agreement(
         for task, answer in zip(tasks, answers, strict=True)
     ]
     return agreement_rate(judge_flags, rule_flags, confidence=confidence)
+
+
+# --- LLM backend -----------------------------------------------------------
+# The optional live judge (Section sec:grader: "an LLM-or-rubric-assisted judge
+# that is distinct from the answer models and sees the known invariant as
+# reference but not the arm identity"). The prompt builder and verdict parser are
+# pure functions so they are exercised deterministically offline; only a real
+# network client makes them "live".
+
+_JUDGE_SYSTEM_PROMPT = (
+    "You are a compliance grader for code edits. You are given a governing "
+    "decision's invariant as reference and one candidate answer produced by an "
+    "undisclosed memory system. Decide only whether the answer HONORS the "
+    "invariant on the produced edit -- not whether it is generally good, and not "
+    "who produced it. Ignore wording, style, and any hint of which system wrote "
+    "it; judge the invariant alone. An answer that merely restates the constraint "
+    "without enforcing it in the change does NOT honor it. Respond with a single "
+    'JSON object: {"honored": <true|false>, "confidence": <0..1>, '
+    '"rationale": "<one sentence>"}.'
+)
+
+
+def build_judge_prompt(
+    decision_text: str,
+    decision_id: str,
+    agent_answer: str,
+    *,
+    prompt_order: PromptOrder = INVARIANT_FIRST,
+) -> tuple[str, str]:
+    """Build the arm-blind ``(system, user)`` grading prompt (Section sec:grader).
+
+    The prompt carries the governing decision's invariant as reference and the
+    candidate answer, and -- by construction -- *no arm identity*. ``prompt_order``
+    swaps which of the two blocks comes first, the presentation-order lever whose
+    stability is a Section sec:gradervalidity validity check.
+
+    Parameters
+    ----------
+    decision_text
+        The governing decision's text (the invariant reference).
+    decision_id
+        The decision's id, used only to label the reference block.
+    agent_answer
+        The candidate answer to grade.
+    prompt_order
+        ``INVARIANT_FIRST`` (default) or ``ANSWER_FIRST``.
+
+    Returns
+    -------
+    tuple of str
+        The ``(system, user)`` prompt pair.
+    """
+    reference = f"Governing decision [{decision_id}] (invariant reference):\n{decision_text}"
+    candidate = f"Candidate answer:\n{agent_answer}"
+    if prompt_order == ANSWER_FIRST:
+        user = f"{candidate}\n\n{reference}\n\nDoes the answer honor the invariant?"
+    else:
+        user = f"{reference}\n\n{candidate}\n\nDoes the answer honor the invariant?"
+    return _JUDGE_SYSTEM_PROMPT, user
+
+
+def parse_verdict(text: str, decision_id: str) -> DecisionVerdict:
+    """Parse a judge model's reply into a :class:`DecisionVerdict`.
+
+    Prefers a strict JSON object (``honored``/``confidence``/``rationale``); when
+    the model wraps the JSON in prose, the first ``{...}`` block is extracted.
+    Falls back to a keyword scan (``honored`` vs ``not honored``/``violat``) and,
+    failing everything, returns a non-honoring verdict flagged as unparseable --
+    a judge whose reply cannot be read must not be silently credited as compliant.
+
+    Parameters
+    ----------
+    text
+        The judge model's raw reply.
+    decision_id
+        The decision this verdict grades.
+
+    Returns
+    -------
+    DecisionVerdict
+        The parsed verdict.
+    """
+    payload = _extract_json_object(text)
+    if payload is not None and "honored" in payload:
+        honored = bool(payload["honored"])
+        confidence = _coerce_confidence(payload.get("confidence"))
+        rationale = str(payload.get("rationale", "")) or "no rationale supplied"
+        return DecisionVerdict(decision_id, honored, rationale, confidence)
+
+    lowered = text.lower()
+    if "not honor" in lowered or "violat" in lowered:
+        return DecisionVerdict(decision_id, False, "keyword fallback: invariant violated", 0.5)
+    if "honor" in lowered:
+        return DecisionVerdict(decision_id, True, "keyword fallback: invariant honored", 0.5)
+    return DecisionVerdict(decision_id, False, "unparseable judge reply", 0.0)
+
+
+def _extract_json_object(text: str) -> dict[str, object] | None:
+    """Return the first JSON object embedded in ``text``, or ``None`` if none parses."""
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        for end in range(start, len(text)):
+            if text[end] == "{":
+                depth += 1
+            elif text[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start : end + 1])
+                    except json.JSONDecodeError:
+                        break
+                    return parsed if isinstance(parsed, dict) else None
+        start = text.find("{", start + 1)
+    return None
+
+
+def _coerce_confidence(value: object) -> float:
+    """Coerce a parsed confidence to a float in ``[0, 1]`` (default ``1.0``)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 1.0
+    return min(max(float(value), 0.0), 1.0)
