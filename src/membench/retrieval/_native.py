@@ -19,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 __all__ = [
+    "cohens_h_native",
     "cosine_topk_native",
     "cosine_topk_reference",
     "crossover_search_native",
@@ -27,6 +28,7 @@ __all__ = [
     "native_library_path",
     "similarity_recovery_native",
     "structured_recovery_native",
+    "wilson_interval_native",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -86,6 +88,13 @@ def _load() -> ctypes.CDLL | None:
         ctypes.c_double,  # tau
         ctypes.c_int,  # max_d
     ]
+    # Inference kernels (membench.metrics.factorization, membench.stats).
+    lib.mb_wilson_low.restype = ctypes.c_double
+    lib.mb_wilson_low.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.mb_wilson_high.restype = ctypes.c_double
+    lib.mb_wilson_high.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.mb_cohens_h.restype = ctypes.c_double
+    lib.mb_cohens_h.argtypes = [ctypes.c_double, ctypes.c_double]
     _LIB = lib
     return lib
 
@@ -198,3 +207,40 @@ def crossover_search_native(
     """
     result = int(_require_lib().mb_crossover_search(s0, rho, q, tau, max_d))
     return result if result != 0 else None
+
+
+def wilson_interval_native(
+    successes: float,
+    trials: float,
+    *,
+    confidence: float = 0.95,
+) -> tuple[float, float]:
+    r"""Native Wilson score interval ``(low, high)`` for a binomial proportion.
+
+    Parity mirror of :func:`membench.metrics.factorization.wilson_interval`
+    (Wilson 1927; the interval reported for the use-factor kappa, tab:realret).
+    The standard-normal quantile ``z`` is computed here with the same
+    ``scipy.stats.norm.ppf`` call as the reference and passed into the kernel, so
+    the two agree to floating-point tolerance.
+    """
+    from scipy import stats  # local import: keeps the native loader lightweight
+
+    if trials <= 0:
+        raise ValueError("trials must be positive")
+    if successes < 0:
+        raise ValueError("successes must be non-negative")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be in (0, 1)")
+    z = float(stats.norm.ppf(1.0 - (1.0 - confidence) / 2.0))
+    lib = _require_lib()
+    low = float(lib.mb_wilson_low(successes, trials, z))
+    high = float(lib.mb_wilson_high(successes, trials, z))
+    return low, high
+
+
+def cohens_h_native(p1: float, p2: float) -> float:
+    r"""Native Cohen's h ``2 asin(sqrt(p1)) - 2 asin(sqrt(p2))`` (paper fig:cohensh).
+
+    Parity mirror of :func:`membench.stats.effect_size.cohens_h`.
+    """
+    return float(_require_lib().mb_cohens_h(p1, p2))
