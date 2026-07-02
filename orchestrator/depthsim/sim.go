@@ -253,6 +253,15 @@ func (m Model) SimulatePRet(a Arm, depth, n, workers int, baseSeed uint64) Estim
 // PaperCalibration (structure already wins at depth 1). Returns 0 if structure
 // never leads within maxDepth. Both arms use the same baseSeed and worker count
 // so the comparison is apples-to-apples and scheduling-independent.
+//
+// Note on the two crossover depths in the paper: this is the closed-form
+// crossover d* = 1 (smallest d with g(d) > 0). The paper also reports a
+// CALIBRATED d* = 2, which holds only under an overhead threshold tau with
+// 0.50 < tau <= 0.79 (structure must beat similarity by more than tau, not
+// merely beat it). This simulator models the generative survival process, not
+// the tau cost margin, so it locates the g > 0 crossover; the tau-thresholded
+// d* = 2 is a downstream decision rule (golden pack A.3), not a property of the
+// generative model.
 func (m Model) EmpiricalCrossover(maxDepth, n, workers int, baseSeed uint64) int {
 	for d := 1; d <= maxDepth; d++ {
 		sim := m.SimulatePRet(Similarity, d, n, workers, baseSeed)
