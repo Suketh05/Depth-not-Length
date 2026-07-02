@@ -19,6 +19,10 @@ from collections import defaultdict
 
 import pytest
 
+from membench.analysis.capture_experiment import (
+    CAPTURE_RETRIEVERS,
+    run_capture_experiment,
+)
 from membench.datasets.capture_conditions import (
     DEFAULT_SIGMA,
     TYPED_LINK_KEYS,
@@ -342,3 +346,76 @@ class TestAssemblySemantics:
         sigma = int(dict(shredded.corpus_by_id)[first_gold].metadata["fragment_count"])
         assert sigma == 3
         assert scatter_factor(0.5, sigma) == 0.125  # exact 1/8
+
+
+_CONDITIONS = tuple(c.value for c in CaptureCondition)
+
+
+class TestDriver:
+    """run_capture_experiment produces well-formed, paired, deterministic rows."""
+
+    # Small but real: 2 retrievers x 3 conditions x (2 depths x 2 tasks).
+    ARMS = ("brief_graph_3hop", "bm25")
+
+    def test_rows_well_formed_and_complete(self) -> None:
+        rows = run_capture_experiment(self.ARMS, depths=(1, 2), per_depth=2, seed=0)
+        # one row per (condition, retriever, task): 3 * 2 * 4
+        assert len(rows) == len(_CONDITIONS) * len(self.ARMS) * 4
+        for row in rows:
+            assert row.retriever in self.ARMS
+            assert row.condition in _CONDITIONS
+            assert row.depth in (1, 2)
+            assert 0.0 <= row.recall <= 1.0
+            assert row.n_gold >= 1
+            assert row.n_retrieved >= 0
+            assert row.chain_recovered == (row.recall == 1.0)  # single-decision tasks
+
+    def test_conditions_are_paired_on_identical_task_ids(self) -> None:
+        # "n=40 tasks per depth, paired across conditions" (tab:capexp caption):
+        # every (retriever, condition) cell covers the same task_id set.
+        rows = run_capture_experiment(self.ARMS, depths=(1, 2), per_depth=2, seed=0)
+        ids_by_cell: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for row in rows:
+            ids_by_cell[(row.retriever, row.condition)].append(row.task_id)
+        reference = ids_by_cell[(self.ARMS[0], _CONDITIONS[0])]
+        assert len(reference) == 4
+        assert all(ids == reference for ids in ids_by_cell.values())
+
+    def test_deterministic(self) -> None:
+        a = run_capture_experiment(self.ARMS, depths=(1, 2), per_depth=2, seed=0)
+        b = run_capture_experiment(self.ARMS, depths=(1, 2), per_depth=2, seed=0)
+        assert a == b
+
+    def test_gold_grows_to_fragment_count_under_raw_scattered(self) -> None:
+        rows = run_capture_experiment(("bm25",), depths=(2,), per_depth=1, sigma=3, seed=0)
+        by_condition = {row.condition: row for row in rows}
+        assert by_condition["captured"].n_gold == 1
+        assert by_condition["discrete_no_links"].n_gold == 1
+        assert by_condition["raw_scattered"].n_gold == 3  # assembly burden visible
+
+    def test_link_strip_hurts_only_the_graph_arm(self) -> None:
+        # Direction-only mechanism check on the driver's own deterministic
+        # corpus (never a published magnitude): at depth 3 the graph arm's
+        # recall drops when links are stripped, while bm25's rows are
+        # unchanged task-for-task.
+        rows = run_capture_experiment(self.ARMS, depths=(3,), per_depth=3, seed=0)
+        brief = [r for r in rows if r.retriever == self.ARMS[0]]
+
+        def mean_recall(condition: str) -> float:
+            values = [r.recall for r in brief if r.condition == condition]
+            return sum(values) / len(values)
+
+        assert mean_recall("captured") > mean_recall("discrete_no_links")
+        bm25_rows = [r for r in rows if r.retriever == "bm25"]
+        captured = {r.task_id: r.recall for r in bm25_rows if r.condition == "captured"}
+        stripped = {r.task_id: r.recall for r in bm25_rows if r.condition == "discrete_no_links"}
+        assert captured == stripped
+
+    def test_accepts_injected_hand_built_tasks(self) -> None:
+        rows = run_capture_experiment(("bm25",), tasks=[_two_hop_task()], seed=0)
+        assert len(rows) == len(_CONDITIONS)
+        assert {row.task_id for row in rows} == {"cap-2hop"}
+        assert {row.depth for row in rows} == {2}
+
+    def test_default_retrievers_are_the_tabcapexp_column(self) -> None:
+        assert CAPTURE_RETRIEVERS == ("brief_graph_3hop", "bm25", "tfidf", "dense")
