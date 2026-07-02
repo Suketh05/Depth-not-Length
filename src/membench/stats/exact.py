@@ -11,9 +11,11 @@ prescribes *exact* methods at those cells, and this module implements them:
   (app:worked, Figure fig:chain): the chain-recovery product event at synthetic
   d=3 is 40/40 for the typed store, giving the exact 95% interval
   :math:`[(0.025)^{1/40}, 1] = [0.912, 1.000]`, versus bm25 at 28/40 giving
-  ``[0.534, 0.834]`` -- disjoint. Also worked example (n) (Figure
-  fig:supersession) and the chain-recovery metric definition in sec:metrics
-  ("Wilson/Clopper--Pearson CI").
+  ``[0.534, 0.834]`` -- disjoint. Worked example (n) (Figure fig:supersession)
+  is titled "Clopper--Pearson supersession separation" but its printed
+  intervals are Wilson (and its rates are not stated as integer counts), so no
+  Clopper--Pearson golden is pinnable there; the chain-recovery metric
+  definition in sec:metrics prescribes a "Wilson/Clopper--Pearson CI".
 * :func:`mcnemar_exact` -- the exact (binomial) McNemar test on discordant pairs,
   the test the fig:forest caption prescribes for boundary cells: "At boundary
   cells (Brief 40/40, p=1.0) the BCa interval is degenerate, so those contrasts
