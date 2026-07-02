@@ -45,6 +45,7 @@ the American Statistical Association*, 56(294), 223--234. (The mid-p correction.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from scipy import stats
@@ -53,6 +54,7 @@ __all__ = [
     "ClopperPearsonInterval",
     "McNemarExactResult",
     "clopper_pearson",
+    "mcnemar_exact",
 ]
 
 
@@ -169,4 +171,73 @@ def clopper_pearson(successes: int, n: int, alpha: float = 0.05) -> ClopperPears
         successes=successes,
         n=n,
         alpha=alpha,
+    )
+
+
+def mcnemar_exact(b: int, c: int) -> McNemarExactResult:
+    r"""Return the exact (binomial) McNemar test on the discordant counts ``b`` and ``c``.
+
+    Given a paired-binary 2x2 table, the concordant cells carry no information about a
+    difference; McNemar's exact test conditions on the ``n = b + c`` discordant pairs
+    and asks whether they split evenly under :math:`H_0: p = 1/2`. The two-sided
+    p-value is twice the smaller tail of the ``Binomial(n, 1/2)`` law, clipped to one:
+
+    .. math::
+
+        p = \min\!\Bigl(1,\; 2 \sum_{k=0}^{\min(b,c)} \binom{n}{k} 2^{-n}\Bigr).
+
+    Because the null is symmetric the doubling is exact (both tails are equal), so the
+    binomial coefficients are summed with :func:`math.comb` and divided by
+    :math:`2^{n}` in exact integer arithmetic before the single float conversion -- the
+    value is a dyadic rational and is returned without approximation error. The
+    Lancaster mid-p variant excludes half of the point mass at the observed count from
+    each tail, :math:`p_\text{mid} = \min(1,\, (2\sum_{k<\min(b,c)}\binom{n}{k} +
+    \binom{n}{\min(b,c)})2^{-n})`, trading guaranteed conservatism for mean calibration.
+
+    With no discordant pairs (``b = c = 0``) the test is undefined in the usual sense;
+    the convention here returns ``p = 1.0`` (no evidence of a difference).
+
+    Parameters
+    ----------
+    b : int
+        Count of pairs where the first arm succeeds and the second fails (``b >= 0``).
+    c : int
+        Count of pairs where the second arm succeeds and the first fails (``c >= 0``).
+
+    Returns
+    -------
+    McNemarExactResult
+        The signed discordance, the exact two-sided p-value, and its mid-p counterpart.
+    """
+    if b < 0 or c < 0:
+        raise ValueError("discordant counts b and c must be non-negative")
+
+    n = b + c
+    statistic = float(b - c)
+    if n == 0:
+        return McNemarExactResult(
+            statistic=statistic,
+            p_value=1.0,
+            mid_p_value=1.0,
+            b=b,
+            c=c,
+            n_discordant=0,
+            method="mcnemar_exact",
+        )
+
+    m = min(b, c)
+    total = 1 << n  # 2 ** n, exact
+    tail = sum(math.comb(n, k) for k in range(m + 1))  # P(X <= m) numerator over 2**n
+    point_mass = math.comb(n, m)  # the observed count's own probability numerator
+
+    p_value = min(1.0, (2 * tail) / total)
+    mid_p_value = min(1.0, (2 * tail - point_mass) / total)
+    return McNemarExactResult(
+        statistic=statistic,
+        p_value=p_value,
+        mid_p_value=mid_p_value,
+        b=b,
+        c=c,
+        n_discordant=n,
+        method="mcnemar_exact",
     )
