@@ -78,3 +78,32 @@ func (m Model) hopSurvival(a Arm, k int) float64 {
 	}
 	return m.S0 * math.Pow(m.Rho, float64(k))
 }
+
+// AnalyticPRet returns the closed-form retrieval probability P_ret(d), the
+// ground truth the Monte-Carlo estimate must reproduce.
+//
+//	Similarity (eq:simceiling, Thm thm:sim): s0^d * rho^(d(d+1)/2)
+//	Structured (Thm thm:struct):             q^d
+//
+// The triangular exponent T = d(d+1)/2 is evaluated as a float64 division, so it
+// matches the Python reference (membench.theory.recovery.similarity_recovery,
+// where d*(d+1)/2 is true division) to within a libm ULP.
+func (m Model) AnalyticPRet(a Arm, d int) float64 {
+	if a == Structured {
+		return math.Pow(m.Q, float64(d))
+	}
+	t := float64(d*(d+1)) / 2
+	return math.Pow(m.S0, float64(d)) * math.Pow(m.Rho, t)
+}
+
+// LogAnalyticPRet returns log P_ret(d) in natural log-space (paper: log form of
+// eq:simceiling is concave with slope -> -infinity). Log-space stays finite where
+// the linear form underflows to 0 (golden pack A.1: similarity at s0=0.5, rho=0.3,
+// d=60 underflows to 0.0 in float64 while the log form is finite).
+func (m Model) LogAnalyticPRet(a Arm, d int) float64 {
+	if a == Structured {
+		return float64(d) * math.Log(m.Q)
+	}
+	t := float64(d*(d+1)) / 2
+	return float64(d)*math.Log(m.S0) + t*math.Log(m.Rho)
+}
