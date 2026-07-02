@@ -20,7 +20,13 @@
 #include <arm_neon.h>
 #endif
 
-int mb_version(void) { return 1; }
+/*
+ * ABI version 2: v1 exposed mb_cosine_topk only; v2 adds the depth-theory and
+ * inference kernels (mb_similarity_recovery, mb_structured_recovery, mb_gap,
+ * mb_crossover_search, mb_wilson_low/high, mb_cohens_h). Bumped because the
+ * exported surface changed, per the header's ABI-version contract.
+ */
+int mb_version(void) { return 2; }
 
 static float mb_dot(const float *a, const float *b, int dim) {
 #ifdef __ARM_NEON
