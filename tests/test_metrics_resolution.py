@@ -7,9 +7,14 @@ are never asserted here.
 
 from __future__ import annotations
 
+import pytest
+
 from membench.metrics.compliance import ComplianceResult
 from membench.metrics.resolution import (
+    ResolutionRate,
     TaskResolution,
+    resolution_by_slice,
+    resolution_rate,
     score_resolution,
 )
 
@@ -79,3 +84,64 @@ class TestScoreResolutionHarnessHook:
 
         score_resolution("swe-8", "diff --git a b", _compliance(1, 1), judge=spy_judge)
         assert seen == [("swe-8", "diff --git a b")]
+
+
+def _outcome(task_id: str, resolved: bool) -> TaskResolution:
+    reason = "all governing decisions honoured" if resolved else "refusal"
+    return TaskResolution(task_id=task_id, resolved=resolved, reason=reason)
+
+
+class TestResolutionRate:
+    def test_golden_seven_of_twelve(self) -> None:
+        # Hand-computed on the paper's smallest slice size (swe3 has n = 12):
+        # 7 resolved of 12 -> rate = 7/12 exactly.
+        outcomes = [_outcome(f"t{i}", i < 7) for i in range(12)]
+        result = resolution_rate(outcomes)
+        assert result == ResolutionRate(resolved=7, total=12, rate=7 / 12)
+
+    def test_all_resolved_and_none_resolved(self) -> None:
+        assert resolution_rate([_outcome("t", True)]).rate == 1.0
+        assert resolution_rate([_outcome("t", False)]).rate == 0.0
+
+    def test_counts_ride_along(self) -> None:
+        # The integer counts are part of the contract (small n stays visible).
+        result = resolution_rate([_outcome("a", True), _outcome("b", False)])
+        assert (result.resolved, result.total) == (1, 2)
+
+    def test_empty_run_raises(self) -> None:
+        # Zero tasks has no rate; silent 0 would fabricate a benchmark number.
+        with pytest.raises(ValueError, match="at least one"):
+            resolution_rate([])
+
+
+class TestResolutionBySlice:
+    def test_slices_keep_their_own_n(self) -> None:
+        # swe1: 2 of 3 resolved -> 2/3; swe3: 1 of 2 -> 1/2. Slices never pool.
+        outcomes = [
+            _outcome("a", True),
+            _outcome("b", True),
+            _outcome("c", False),
+            _outcome("d", True),
+            _outcome("e", False),
+        ]
+        slices = {"a": "swe1", "b": "swe1", "c": "swe1", "d": "swe3", "e": "swe3"}
+        by_slice = resolution_by_slice(outcomes, slices)
+        assert by_slice == {
+            "swe1": ResolutionRate(resolved=2, total=3, rate=2 / 3),
+            "swe3": ResolutionRate(resolved=1, total=2, rate=1 / 2),
+        }
+
+    def test_unlabelled_task_fails_loud(self) -> None:
+        # A task with no slice must not be silently dropped or pooled.
+        with pytest.raises(ValueError, match="no slice label"):
+            resolution_by_slice([_outcome("orphan", True)], {})
+
+    def test_empty_run_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            resolution_by_slice([], {})
+
+    def test_single_slice_matches_pooled_rate(self) -> None:
+        # Degenerate consistency: one slice == the pooled statistic.
+        outcomes = [_outcome("a", True), _outcome("b", False)]
+        by_slice = resolution_by_slice(outcomes, {"a": "all", "b": "all"})
+        assert by_slice["all"] == resolution_rate(outcomes)
