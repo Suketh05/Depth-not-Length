@@ -102,3 +102,33 @@ func TestEmpiricalMatchesAnalyticWithin3SE(t *testing.T) {
 		}
 	}
 }
+
+// TestSchedulingIndependence proves the estimate is a pure function of the
+// inputs, not of the goroutine schedule: because each trial is reseeded from its
+// GLOBAL index (trialSeed), 1 worker and 8 workers must return the IDENTICAL
+// success count (not just statistically close). This is the property that lets
+// the concurrent simulator stand in for a serial reference.
+func TestSchedulingIndependence(t *testing.T) {
+	m := PaperCalibration
+	const n = 50000
+	for d := 1; d <= 5; d++ {
+		for _, a := range []Arm{Similarity, Structured} {
+			one := m.SimulatePRet(a, d, n, 1, simSeed)
+			eight := m.SimulatePRet(a, d, n, 8, simSeed)
+			if one.Successes != eight.Successes {
+				t.Fatalf("%s d=%d: 1 worker=%d successes, 8 workers=%d successes (must be identical)",
+					a, d, one.Successes, eight.Successes)
+			}
+			if one.PHat() != eight.PHat() {
+				t.Fatalf("%s d=%d: PHat differs across worker counts: %v vs %v", a, d, one.PHat(), eight.PHat())
+			}
+		}
+	}
+	// A worker count larger than n (some workers get zero trials) must not change
+	// the answer either.
+	huge := m.SimulatePRet(Similarity, 3, n, 4096, simSeed)
+	base := m.SimulatePRet(Similarity, 3, n, 1, simSeed)
+	if huge.Successes != base.Successes {
+		t.Fatalf("workers>n changed result: %d vs %d", huge.Successes, base.Successes)
+	}
+}
