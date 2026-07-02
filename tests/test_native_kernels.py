@@ -186,3 +186,38 @@ class TestNativeGoldenConstants:
         assert structured_recovery_native(0.97, 2) == 0.9409
 
 
+@pytest.mark.skipif(not native_available(), reason="native kernel not built")
+class TestNativeStatsParity:
+    """Parity of the inference kernels vs. their Python references (Wilson 1927
+    score interval; Cohen's h, fig:cohensh)."""
+
+    @pytest.mark.parametrize(
+        ("successes", "trials"),
+        [(8, 10), (6, 8), (60, 100), (0, 10), (10, 10), (6.5, 8.0), (344, 604)],
+    )
+    @pytest.mark.parametrize("confidence", [0.90, 0.95, 0.99])
+    def test_wilson_parity(
+        self, successes: float, trials: float, confidence: float
+    ) -> None:
+        ref_low, ref_high = wilson_interval(successes, trials, confidence=confidence)
+        nat_low, nat_high = wilson_interval_native(successes, trials, confidence=confidence)
+        assert abs(nat_low - ref_low) <= _PARITY_TOL
+        assert abs(nat_high - ref_high) <= _PARITY_TOL
+
+    @pytest.mark.parametrize(
+        ("p1", "p2"),
+        [(0.9, 0.5), (0.933, 0.858), (0.875, 0.800), (0.5, 0.5), (0.0, 1.0), (1.0, 0.0)],
+    )
+    def test_cohens_h_parity(self, p1: float, p2: float) -> None:
+        ref = cohens_h(p1, p2)
+        nat = cohens_h_native(p1, p2)
+        assert abs(nat - ref) <= _PARITY_TOL
+
+    def test_cohens_h_zero_at_equal_rates(self) -> None:
+        assert cohens_h_native(0.5, 0.5) == 0.0
+
+    def test_cohens_h_golden(self) -> None:
+        # golden_pack C.7: h(0.9, 0.5) full precision.
+        assert math.isclose(
+            cohens_h_native(0.9, 0.5), 0.9272952180016121, rel_tol=0.0, abs_tol=1e-15
+        )
