@@ -54,3 +54,31 @@ CREATE INDEX idx_entity_link_target ON entity_link (target_entity_object_id);
 --       WHERE walk.depth < :max_hops AND e.confidence >= :min_confidence
 --   )
 --   SELECT DISTINCT node, depth FROM walk ORDER BY depth;
+
+-- ============================================================================
+-- VERIFICATION SUITE (appended; DDL above is unchanged).
+-- ============================================================================
+-- Executable, self-checking cross-language differential test for the typed
+-- decision-graph arm ("brief_graph_3hop") of the "Depth, Not Length" benchmark.
+-- CI runs `sqlite3 ":memory:" < schema/graph.sql`; sqlite3 batch mode stops at
+-- the first SQL error and exits non-zero, so every assertion below is written as
+-- an INSERT into a table with `CHECK (ok = 1)` -- a false predicate yields ok=0,
+-- the CHECK fails, and CI turns red. The suite therefore FAILS on any mismatch.
+--
+-- What it verifies, and the paper anchors (labels from depth_not_length_FIXED.tex):
+--   1. Bounded traversal recovers a decision at exactly its causal-hop depth,
+--      d=3 governing chain                          -- eq:perhop, thm:struct, sec:struct
+--   2. Super-geometric similarity decay vs steady per-hop traversal cost, and
+--      the ~29x depth-3 gap                          -- eq:simceiling, thm:sim, sec:depth
+--   3. The capture lever: strip the typed links and reachability collapses to 0
+--      (Discrete-no-links / Raw-scattered condition) -- sec:capture, tab:capexp
+--   4. Supersession resolves to the CURRENT decision, while a similarity proxy
+--      returns a stale near-identical version         -- tab:super, sec:resmech-super
+--   5. Fairness-lock integrity: the typed-edge domain and value CHECK
+--      constraints are present and enforced           -- sec:fairness
+--
+-- Golden numeric constants are transcribed VERBATIM from the canonical golden
+-- pack (theory goldens A.1 P_sim/P_struct, A.7 supersession); never recomputed
+-- here. SQLite float64 == Python float64 for these products (abs err 0.0), and
+-- assertions still allow abs tol 1e-12 for portability across CI hosts.
+
