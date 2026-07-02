@@ -38,11 +38,12 @@ many tokens they burn"); the rate lives in :mod:`membench.agents.llm.pricing`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from membench.agents.llm.base import LLMResponse
 
 __all__ = [
+    "Session",
     "TurnLedger",
 ]
 
@@ -121,3 +122,104 @@ class TurnLedger:
             resolved=resolved,
             dollars=response.dollars,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Session:
+    """An ordered per-turn ledger for one multi-turn coding session (sec:tokecon).
+
+    The turn tuple is the raw evidence; every reported quantity in
+    ``tab:tok_agent_context_gpt55`` and ``tab:tok_agent_economics`` is derived from
+    it. A ``Session`` is deliberately metrics-free about the model and the cost
+    rate: it carries the backend ``model`` id so the blended-rate cost can be
+    reconstructed (see :meth:`blended_cost_dollars`), but it stores only counts and
+    resolution flags, never a scoring decision.
+
+    Parameters
+    ----------
+    model
+        Backend model id billed on every turn (e.g. ``"gpt-5.5"``). Fixed across
+        the session, matching the paper's "one fixed backend model" design.
+    arm_label
+        The turn-1 context layer wrapped around the backend (e.g. ``"brief_graph"``,
+        ``"mem0"``, ``"none"``) -- the axis the sweep varies.
+    turns
+        The per-turn ledger rows, in order. May be empty (a session that made no
+        model call: session tokens 0, never resolved).
+    """
+
+    model: str
+    arm_label: str
+    turns: tuple[TurnLedger, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "turns", tuple(self.turns))
+        for expected, turn in enumerate(self.turns, start=1):
+            if turn.turn != expected:
+                raise ValueError(
+                    f"turns must be 1-based and contiguous; expected turn {expected}, "
+                    f"got {turn.turn}"
+                )
+        # A resolution is absorbing: nothing runs after the task is resolved.
+        resolved_seen = False
+        for turn in self.turns:
+            if resolved_seen:
+                raise ValueError("no turn may follow a resolved turn (resolution is absorbing)")
+            resolved_seen = turn.resolved
+
+    @property
+    def num_turns(self) -> int:
+        """Number of turns (model calls) the session ran (the outcome's turn count)."""
+        return len(self.turns)
+
+    @property
+    def session_tokens(self) -> int:
+        """Total tokens billed over the whole session (paper ``Session tok.`` column).
+
+        Equal to the sum of the per-turn totals; the identity that this equals the
+        sum of the published per-turn columns is asserted for every row of
+        ``tab:tok_agent_context_gpt55``.
+        """
+        return sum(turn.total_tokens for turn in self.turns)
+
+    @property
+    def total_prompt_tokens(self) -> int:
+        """Prompt tokens summed over all turns."""
+        return sum(turn.prompt_tokens for turn in self.turns)
+
+    @property
+    def total_completion_tokens(self) -> int:
+        """Completion tokens summed over all turns."""
+        return sum(turn.completion_tokens for turn in self.turns)
+
+    @property
+    def reported_dollars(self) -> float:
+        """Sum of the per-call dollar costs reported on each turn (runner path)."""
+        return sum(turn.dollars for turn in self.turns)
+
+    @property
+    def resolved(self) -> bool:
+        """Whether the session resolved the task (paper outcome ``resolved``)."""
+        return any(turn.resolved for turn in self.turns)
+
+    @property
+    def convergence_turn(self) -> int | None:
+        """First turn index at which the task resolved, or ``None`` if unresolved.
+
+        This is the paper's headline collapse quantity: with ``Brief`` context the
+        session converges at turn 2--3; with no context or a consolidation layer it
+        runs long or never resolves.
+        """
+        for turn in self.turns:
+            if turn.resolved:
+                return turn.turn
+        return None
+
+    def cumulative_tokens(self) -> tuple[int, ...]:
+        """Return the running total of session tokens after each turn (monotone)."""
+        running = 0
+        totals: list[int] = []
+        for turn in self.turns:
+            running += turn.total_tokens
+            totals.append(running)
+        return tuple(totals)
