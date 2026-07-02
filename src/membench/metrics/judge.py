@@ -33,6 +33,18 @@ implements: the **agreement rate between the judge and the rule-based scorer**
 grader-validity robustness suite (held-out arm-recovery test, verdict stability
 under rubric paraphrase and swapped presentation order) is out of scope for this
 module -- the paper flags it as needed-before-earned future work.
+
+Cross-checks a reader can verify (asserted verbatim in the tests):
+
+* The agreement Wilson interval reuses ``metrics.factorization.wilson_interval``,
+  so a 6-of-8 agreement has 95% CI ``(0.40927543031016883, 0.9285207872478909)``
+  and an 8-of-10 agreement ``(0.49016247153664183, 0.9433178485456247)`` -- the
+  same binomial-proportion literals used elsewhere in the suite.
+* The rubric's *asserted* predicate is deliberately identical to
+  :func:`membench.metrics.compliance.score_compliance`, so with the gaming guard
+  off the stub judge agrees with the rule-based scorer by construction (rate 1.0),
+  and every disagreement with the guard on is a pure-restatement case counted in
+  ``AgreementResult.judge_stricter``.
 """
 
 from __future__ import annotations
