@@ -43,9 +43,14 @@ from __future__ import annotations
 
 import re
 import string
+from collections import Counter
+from dataclasses import dataclass
 
 __all__ = [
+    "F1Result",
+    "exact_match",
     "normalize_answer",
+    "token_f1",
     "tokenize_answer",
 ]
 
@@ -98,3 +103,108 @@ def tokenize_answer(text: str) -> list[str]:
     """
     normalized = normalize_answer(text)
     return normalized.split() if normalized else []
+
+
+@dataclass(frozen=True, slots=True)
+class F1Result:
+    """Precision / recall / F1 with the integer overlap counts that produced them.
+
+    The counts are retained so every ratio is auditable: ``precision =
+    overlap / n_predicted``, ``recall = overlap / n_gold`` and, by the
+    harmonic-mean identity,
+
+    .. math::
+
+        F_1 = \\frac{2PR}{P + R} = \\frac{2 \\cdot \\text{overlap}}
+              {n_\\text{predicted} + n_\\text{gold}},
+
+    which is how :attr:`f1` is computed -- one exact integer division, no
+    intermediate float rounding, so tiny hand-computed goldens are exact
+    fractions (e.g. overlap 2 of 3 predicted / 4 gold gives F1 = 4/7).
+    """
+
+    precision: float
+    recall: float
+    f1: float
+    overlap: int
+    n_predicted: int
+    n_gold: int
+
+
+def _f1_from_counts(overlap: int, n_predicted: int, n_gold: int) -> F1Result:
+    """Assemble an :class:`F1Result` from integer counts (single-division ratios)."""
+    precision = overlap / n_predicted if n_predicted else 0.0
+    recall = overlap / n_gold if n_gold else 0.0
+    f1 = 2 * overlap / (n_predicted + n_gold) if (n_predicted + n_gold) else 0.0
+    return F1Result(
+        precision=precision,
+        recall=recall,
+        f1=f1,
+        overlap=overlap,
+        n_predicted=n_predicted,
+        n_gold=n_gold,
+    )
+
+
+def exact_match(prediction: str, gold: str) -> bool:
+    """Return whether prediction and gold agree after normalization.
+
+    The SQuAD exact-match event: equality of :func:`normalize_answer` forms.
+    Two "no answer" strings (both normalize to ``""``) match.
+
+    Parameters
+    ----------
+    prediction
+        Model answer text.
+    gold
+        Gold answer text.
+
+    Returns
+    -------
+    bool
+        ``True`` iff the normalized strings are identical.
+    """
+    return normalize_answer(prediction) == normalize_answer(gold)
+
+
+def token_f1(prediction: str, gold: str) -> F1Result:
+    """Token-overlap F1 between a predicted and a gold answer (SQuAD protocol).
+
+    Both strings are normalized and whitespace-tokenized; the overlap is the
+    *multiset* (bag) intersection of the two token bags, exactly as in the
+    SQuAD evaluation script: a token predicted twice only counts twice if it
+    also appears twice in gold. Precision divides by the predicted-token
+    count, recall by the gold-token count.
+
+    Degenerate "no answer" rule (also SQuAD's): if either side normalizes to
+    the empty string, F1 (and P and R) is 1.0 when *both* are empty and 0.0
+    otherwise -- token overlap is meaningless against an empty bag.
+
+    Parameters
+    ----------
+    prediction
+        Model answer text.
+    gold
+        Gold answer text.
+
+    Returns
+    -------
+    F1Result
+        Precision, recall, F1 and the integer counts behind them.
+    """
+    pred_tokens = tokenize_answer(prediction)
+    gold_tokens = tokenize_answer(gold)
+    if not pred_tokens or not gold_tokens:
+        # SQuAD degenerate rule: empty-vs-empty is a perfect match, else zero.
+        score = 1.0 if pred_tokens == gold_tokens else 0.0
+        return F1Result(
+            precision=score,
+            recall=score,
+            f1=score,
+            overlap=0,
+            n_predicted=len(pred_tokens),
+            n_gold=len(gold_tokens),
+        )
+    overlap_counts = Counter(pred_tokens) & Counter(gold_tokens)
+    overlap = sum(overlap_counts.values())
+    return _f1_from_counts(overlap, len(pred_tokens), len(gold_tokens))
