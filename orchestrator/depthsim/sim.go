@@ -32,7 +32,11 @@
 // Stdlib only (math, math/rand, sync); gofmt-clean.
 package depthsim
 
-import "math"
+import (
+	"math"
+	"math/rand"
+	"sync"
+)
 
 // Arm identifies a retrieval mechanism in the per-hop survival model.
 type Arm int
@@ -182,4 +186,62 @@ func (e Estimate) StdErr() float64 {
 	}
 	p := e.PHat()
 	return math.Sqrt(p * (1 - p) / float64(e.Trials))
+}
+
+// SimulatePRet runs n seeded Bernoulli-chain trials for (arm, depth) fanned out
+// across `workers` goroutines and returns the pooled Estimate. Each trial draws
+// d independent uniforms and succeeds iff every hop survives (u_k < f_k); this is
+// exactly the series-system model P_ret(d) = Prod f_k (eq:perhop). A hop with
+// f_k = 1 always survives (u in [0,1) < 1) and f_k = 0 never does, so the chance
+// floor (survival 0) and saturation (survival 1) are exact, not just asymptotic.
+//
+// Trials are striped across workers (worker w owns indices w, w+workers, ...) and
+// each is reseeded by trialSeed from its GLOBAL index, so the result is identical
+// for any worker count. Each goroutine owns a private *rand.Rand (reseeded per
+// trial) — no shared RNG, no lock, no data race.
+func (m Model) SimulatePRet(a Arm, depth, n, workers int, baseSeed uint64) Estimate {
+	if workers < 1 {
+		workers = 1
+	}
+	if n <= 0 {
+		return Estimate{Arm: a, Depth: depth, Trials: 0}
+	}
+
+	// Per-hop survival probabilities, computed once.
+	surv := make([]float64, depth)
+	for k := 1; k <= depth; k++ {
+		surv[k-1] = m.hopSurvival(a, k)
+	}
+
+	partial := make([]int, workers)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			r := rand.New(rand.NewSource(1)) // seed overwritten per trial
+			count := 0
+			for t := w; t < n; t += workers {
+				r.Seed(trialSeed(baseSeed, a, depth, t))
+				survived := true
+				for _, pk := range surv {
+					if r.Float64() >= pk {
+						survived = false
+						break
+					}
+				}
+				if survived {
+					count++
+				}
+			}
+			partial[w] = count
+		}(w)
+	}
+	wg.Wait()
+
+	total := 0
+	for _, c := range partial {
+		total += c
+	}
+	return Estimate{Arm: a, Depth: depth, Successes: total, Trials: n}
 }
