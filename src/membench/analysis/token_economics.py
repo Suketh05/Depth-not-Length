@@ -46,6 +46,8 @@ Paper anchors
 
 from __future__ import annotations
 
+from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -54,6 +56,7 @@ __all__ = [
     "Matchup",
     "MatchupOutcome",
     "SessionRecord",
+    "build_matchups",
 ]
 
 #: The context-layer name reserved for the typed decision-graph store under test.
@@ -158,3 +161,79 @@ class Matchup:
     def brief_wins(self) -> bool:
         """``True`` iff the typed store spent strictly fewer session tokens."""
         return self.outcome is MatchupOutcome.BRIEF_CHEAPER
+
+
+def build_matchups(
+    sessions: Iterable[SessionRecord],
+    *,
+    brief_layer: str = DEFAULT_BRIEF_LAYER,
+) -> tuple[Matchup, ...]:
+    """Pair the typed store against every competitor on each shared cell.
+
+    Groups the session records by ``(backend model, task)`` cell and, within each
+    cell, forms one matchup between the ``brief_layer`` session and every other
+    context layer present (Section ``sec:tokecon``, ``tab:tok_context_winrate``).
+    A full sweep of ``M`` backend models, ``T`` tasks and ``C`` competing layers
+    (each with exactly one session per cell) yields ``M * T * C`` matchups -- the
+    ``12 * 30 * 10 = 3600`` of the paper.
+
+    Matchups are returned in a deterministic order: cells sorted by
+    ``(backend_model, task_id)``, and within a cell competitors sorted by name, so
+    the output is reproducible regardless of input ordering.
+
+    Parameters
+    ----------
+    sessions
+        Session records. Each ``(backend model, task, context layer)`` triple must
+        appear at most once.
+    brief_layer
+        The context-layer name treated as the typed store under test; every other
+        layer in a cell becomes a competitor.
+
+    Returns
+    -------
+    tuple of Matchup
+        One matchup per ``(cell, competitor)`` pair, deterministically ordered.
+
+    Raises
+    ------
+    ValueError
+        If a ``(backend model, task, context layer)`` triple is duplicated, or if
+        a cell contains competitor sessions but no ``brief_layer`` session (a
+        missing typed-store baseline is a data error, not a silent skip).
+    """
+    brief_by_cell: dict[tuple[str, str], SessionRecord] = {}
+    competitors_by_cell: dict[tuple[str, str], dict[str, SessionRecord]] = defaultdict(dict)
+
+    for session in sessions:
+        cell = (session.backend_model, session.task_id)
+        if session.context_layer == brief_layer:
+            if cell in brief_by_cell:
+                msg = f"duplicate {brief_layer!r} session for cell {cell}"
+                raise ValueError(msg)
+            brief_by_cell[cell] = session
+        else:
+            layer_map = competitors_by_cell[cell]
+            if session.context_layer in layer_map:
+                msg = f"duplicate {session.context_layer!r} session for cell {cell}"
+                raise ValueError(msg)
+            layer_map[session.context_layer] = session
+
+    matchups: list[Matchup] = []
+    for cell in sorted(competitors_by_cell):
+        brief_session = brief_by_cell.get(cell)
+        if brief_session is None:
+            msg = f"cell {cell} has competitor sessions but no {brief_layer!r} session"
+            raise ValueError(msg)
+        for competitor in sorted(competitors_by_cell[cell]):
+            competitor_session = competitors_by_cell[cell][competitor]
+            matchups.append(
+                Matchup(
+                    backend_model=cell[0],
+                    task_id=cell[1],
+                    competitor=competitor,
+                    brief_tokens=brief_session.session_tokens,
+                    competitor_tokens=competitor_session.session_tokens,
+                )
+            )
+    return tuple(matchups)
