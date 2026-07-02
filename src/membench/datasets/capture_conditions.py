@@ -49,12 +49,16 @@ dropped, only de-unitised.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import Enum
+
+from membench.types import MemoryItem, Task
 
 __all__ = [
     "DEFAULT_SIGMA",
     "TYPED_LINK_KEYS",
     "CaptureCondition",
+    "strip_edges",
 ]
 
 TYPED_LINK_KEYS: tuple[str, ...] = ("edges", "constrains")
@@ -93,3 +97,48 @@ class CaptureCondition(str, Enum):
     CAPTURED = "captured"
     DISCRETE_NO_LINKS = "discrete_no_links"
     RAW_SCATTERED = "raw_scattered"
+
+
+def _strip_item(item: MemoryItem) -> MemoryItem:
+    """Return ``item`` with the typed-link metadata keys removed.
+
+    Everything else -- id, text, and every non-link metadata key (``node_type``,
+    dataset annotations, ...) -- is preserved verbatim, so the item stays a
+    clean discrete unit and only its traversability changes.
+    """
+    metadata = {k: v for k, v in item.metadata.items() if k not in TYPED_LINK_KEYS}
+    return MemoryItem(item.item_id, item.text, metadata=metadata)
+
+
+def strip_edges(task: Task) -> Task:
+    """Transform a task into the **Discrete-no-links** condition.
+
+    Removes the typed governance links (:data:`TYPED_LINK_KEYS`) from every
+    corpus item while keeping each decision as a clean, discrete item: ids,
+    texts, item count, corpus order, gold ``governing_decisions``, depth, and
+    all other task fields are unchanged. "Discrete-no-links keeps each decision
+    as a clean, discrete item but strips the edges, so the retriever must fall
+    back on similarity between discrete items" (Subsection ``sec:capconds``).
+
+    The manipulation is surgical by construction: only the graph arm reads the
+    stripped keys, so an arm that never read them retrieves identically under
+    CAPTURED and Discrete-no-links -- the paper's own falsification check
+    ("the lexical blocks bm25, tfidf, and dense are identical across CAPTURED
+    and Discrete-no-links", Section ``sec:capture``).
+
+    Parameters
+    ----------
+    task
+        The CAPTURED-condition task to transform. Never mutated (tasks and
+        items are frozen); a new :class:`~membench.types.Task` is returned.
+
+    Returns
+    -------
+    Task
+        The same task with a link-free corpus. Pure, deterministic, and
+        idempotent: ``strip_edges(strip_edges(t)) == strip_edges(t)``.
+    """
+    return replace(
+        task,
+        memory_corpus=tuple(_strip_item(item) for item in task.memory_corpus),
+    )
