@@ -103,3 +103,17 @@ dersimonian_laird <- function(y, v) {
        sum_wstar_y = sum(w_star * y), sum_wstar = sw_star,
        pooled = pooled, se = sqrt(1 / sw_star))
 }
+
+# Golden pack C.2 3-study case: y=[.1,.3,.5], v=[.02,.03,.05], k=3.
+# Exact fractions: theta_F=15/62, Q=76/31, tau^2=14/2000=0.007, I^2=7/38.
+dl <- dersimonian_laird(c(0.1, 0.3, 0.5), c(0.02, 0.03, 0.05))
+assert_close(dl$theta_fixed, 15 / 62,             1e-12, "DL:theta_fixed=15/62")
+assert_close(dl$Q,           76 / 31,             1e-12, "DL:Q=76/31")
+assert_close(dl$tau2,        0.007,               1e-12, "DL:tau2=0.007")
+assert_close(dl$I2,          7 / 38,              1e-12, "DL:I2=7/38")
+assert_close(dl$sum_wstar_y, 20.58374163637322,   1e-9,  "DL:sum(w*.y)")
+assert_close(dl$sum_wstar,   81.60792371318689,   1e-9,  "DL:sum(w*)")
+assert_close(dl$pooled,      0.2522272433828276,  1e-12, "DL:pooled")
+assert_close(dl$se,          0.11069648626900815, 1e-9,  "DL:SE")
+cat(sprintf("PASS (1) DerSimonian-Laird: Q=%.15g tau2=%.15g I2=%.15g pooled=%.16g\n",
+            dl$Q, dl$tau2, dl$I2, dl$pooled))
