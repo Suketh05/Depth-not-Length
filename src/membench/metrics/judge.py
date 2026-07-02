@@ -43,10 +43,12 @@ constant is asserted here; the machinery exists so a rerun can report one.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 __all__ = [
     "PROMPT_ORDERS",
+    "ComplianceJudge",
     "JudgeCase",
     "JudgeConfig",
     "JudgeVerdict",
@@ -176,3 +178,25 @@ class JudgeVerdict:
     rationale: str
     config: JudgeConfig
     parse_ok: bool = True
+
+
+class ComplianceJudge(ABC):
+    """The judging contract: (task, governing invariant, answer) -> verdict.
+
+    Section ``sec:grader`` describes one judge role with two admissible
+    implementations -- "an LLM-***or-rubric***-assisted judge" -- so the contract is
+    an ABC (mirroring :class:`membench.retrieval.base.MemorySystem` and
+    :class:`membench.agents.llm.base.LLMClient`) with the deterministic rubric stub
+    and the live LLM backend as interchangeable subclasses. Everything downstream
+    (per-task judging, agreement machinery) is written against this contract only.
+    """
+
+    @property
+    @abstractmethod
+    def config(self) -> JudgeConfig:
+        """The judge's recorded identity: model, version, prompt order, decoding."""
+
+    @abstractmethod
+    def judge(self, case: JudgeCase) -> JudgeVerdict:
+        """Grade one (task, governing decision, answer) unit into a verdict."""
+        raise NotImplementedError
