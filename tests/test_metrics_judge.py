@@ -12,6 +12,7 @@ Goldens are hand-built:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 
 import pytest
@@ -34,6 +35,13 @@ from membench.metrics.judge import (
     parse_verdict,
 )
 from membench.types import MemoryItem, Scorer, SpecVariant, Task
+
+# The live judge needs BOTH the anthropic extra (uv sync --extra anthropic) and an
+# API key; without either, the live-marked test is skipped rather than erroring so
+# a plain per-file run stays green offline.
+_LIVE_READY = importlib.util.find_spec("anthropic") is not None and bool(
+    os.environ.get("ANTHROPIC_API_KEY")
+)
 
 # --- fixtures / builders ---------------------------------------------------
 
@@ -466,7 +474,7 @@ class TestMakeJudgeFactory:
 @pytest.mark.live
 class TestLLMJudgeLive:
     @pytest.mark.skipif(
-        not os.environ.get("ANTHROPIC_API_KEY"), reason="live judge needs ANTHROPIC_API_KEY"
+        not _LIVE_READY, reason="live judge needs the anthropic extra and ANTHROPIC_API_KEY"
     )
     def test_live_llm_judge_grades_an_enforced_answer(self) -> None:
         judge = make_judge("llm")
