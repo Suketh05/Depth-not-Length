@@ -42,17 +42,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from membench.metrics.compliance import decision_keywords
+from membench.metrics.compliance import decision_keywords, score_compliance_for_task
+from membench.metrics.factorization import wilson_interval
 from membench.types import MemoryItem, Task
 
 __all__ = [
     "DEFAULT_JUDGE_MODEL",
+    "AgreementResult",
     "ComplianceVerdict",
     "DecisionVerdict",
     "Judge",
     "JudgeConfig",
     "PromptOrder",
     "StubJudge",
+    "agreement_rate",
+    "judge_vs_rule_agreement",
 ]
 
 # The answer models in the paper are Claude (Sonnet) and GPT-5.1 (Section
@@ -340,3 +344,144 @@ class StubJudge:
             rationale=rationale,
             confidence=confidence,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AgreementResult:
+    """Judge-vs-rule agreement, the construct-validity check of Section sec:gradervalidity.
+
+    The paper defends the compliance construct partly by the **agreement rate
+    between the LLM-or-rubric judge and the rule-based (mechanical) scorer**. This
+    is the observed agreement -- the fraction of items on which the two estimators
+    return the same compliant/not-compliant event -- with a Wilson score interval
+    (the repo's default binomial-proportion interval, ``metrics.factorization``).
+    The two disagreement directions are also recorded because they are not
+    symmetric: ``judge_stricter`` counts the gaming-guard cases where the rule
+    scorer credits an asserted-but-not-enforced invariant that the judge rejects
+    (Section sec:gradervalidity).
+
+    Parameters
+    ----------
+    n_agree
+        Number of items on which judge and rule agree.
+    n_total
+        Number of graded items.
+    judge_stricter
+        Items the rule scores compliant but the judge does not (gaming-guard hits).
+    rule_stricter
+        Items the judge scores compliant but the rule does not.
+    ci
+        Wilson 95% interval on the agreement proportion, or ``None`` when empty.
+    """
+
+    n_agree: int
+    n_total: int
+    judge_stricter: int
+    rule_stricter: int
+    ci: tuple[float, float] | None
+
+    @property
+    def rate(self) -> float:
+        """Observed agreement ``n_agree / n_total``; ``1.0`` for the empty set."""
+        if self.n_total == 0:
+            return 1.0
+        return self.n_agree / self.n_total
+
+
+def agreement_rate(
+    judge_flags: Sequence[bool],
+    rule_flags: Sequence[bool],
+    *,
+    confidence: float = 0.95,
+) -> AgreementResult:
+    """Observed agreement between the judge and the rule-based scorer (Section sec:gradervalidity).
+
+    Parameters
+    ----------
+    judge_flags
+        The judge's per-item compliant/not-compliant events.
+    rule_flags
+        The rule-based scorer's per-item events, aligned index-for-index with
+        ``judge_flags``.
+    confidence
+        Two-sided confidence level for the Wilson interval on the agreement rate.
+
+    Returns
+    -------
+    AgreementResult
+        The agreement count, directional disagreement counts, and Wilson CI.
+
+    Raises
+    ------
+    ValueError
+        If the two sequences differ in length.
+    """
+    if len(judge_flags) != len(rule_flags):
+        raise ValueError(
+            f"judge_flags and rule_flags must align: {len(judge_flags)} != {len(rule_flags)}"
+        )
+    n_total = len(judge_flags)
+    n_agree = sum(1 for judge, rule in zip(judge_flags, rule_flags, strict=True) if judge == rule)
+    judge_stricter = sum(
+        1 for judge, rule in zip(judge_flags, rule_flags, strict=True) if rule and not judge
+    )
+    rule_stricter = sum(
+        1 for judge, rule in zip(judge_flags, rule_flags, strict=True) if judge and not rule
+    )
+    ci = wilson_interval(n_agree, n_total, confidence=confidence) if n_total > 0 else None
+    return AgreementResult(
+        n_agree=n_agree,
+        n_total=n_total,
+        judge_stricter=judge_stricter,
+        rule_stricter=rule_stricter,
+        ci=ci,
+    )
+
+
+def judge_vs_rule_agreement(
+    judge: Judge,
+    tasks: Sequence[Task],
+    answers: Sequence[str],
+    *,
+    confidence: float = 0.95,
+) -> AgreementResult:
+    """Grade ``tasks`` with both estimators and return their agreement.
+
+    Runs ``judge`` and the mechanical rule-based scorer
+    (:func:`membench.metrics.compliance.score_compliance_for_task`) over the same
+    (task, answer) pairs and compares the task-level compliant events -- the
+    end-to-end form of the Section sec:gradervalidity agreement check.
+
+    Parameters
+    ----------
+    judge
+        Any :class:`Judge` (stub or LLM backend).
+    tasks
+        The evaluation units.
+    answers
+        The agent answers, aligned index-for-index with ``tasks``.
+    confidence
+        Two-sided confidence level for the Wilson interval.
+
+    Returns
+    -------
+    AgreementResult
+        The judge-vs-rule agreement over the graded tasks.
+
+    Raises
+    ------
+    ValueError
+        If ``tasks`` and ``answers`` differ in length.
+    """
+    if len(tasks) != len(answers):
+        raise ValueError(f"tasks and answers must align: {len(tasks)} != {len(answers)}")
+    judge_flags = [
+        judge.grade(task, answer).compliant for task, answer in zip(tasks, answers, strict=True)
+    ]
+    rule_flags = [
+        # Rule-based compliant event: every governing decision honored (rate == 1.0),
+        # the same bimodal task-level event ComplianceVerdict.compliant uses.
+        score_compliance_for_task(answer, task).rate == 1.0
+        for task, answer in zip(tasks, answers, strict=True)
+    ]
+    return agreement_rate(judge_flags, rule_flags, confidence=confidence)
