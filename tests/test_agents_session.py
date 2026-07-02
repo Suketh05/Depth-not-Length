@@ -12,8 +12,17 @@ from __future__ import annotations
 
 import pytest
 
-from membench.agents.llm.pricing import session_blended_cost
-from membench.agents.session import Session, TurnLedger
+from membench.agents.llm.pricing import (
+    SESSION_BLENDED_RATE_PER_MTOK,
+    TOKECON_BACKEND_MODELS,
+    session_blended_cost,
+)
+from membench.agents.session import (
+    Session,
+    TurnLedger,
+    efficiency_score,
+    tokens_per_resolved_point,
+)
 
 
 def _usd_tol(decimals: int) -> float:
@@ -37,6 +46,113 @@ _GPT55_ROWS: tuple[tuple[str, tuple[int, ...], int, float, int, bool, int | None
     ("ContextQ context", (1648, 612, 541, 926), 3727, 0.0447, 4, False, None),
     ("Zep context", (1576, 448, 382, 318), 2724, 0.0327, 4, True, 4),
 )
+
+
+# tab:tok_agent_economics -- pooled quality x cost, gpt-4o billing. Transcribed
+# verbatim: system, resolution %, session tokens, USD, USD decimals, tokens per
+# resolved point, composite efficiency score.
+_ECON_ROWS: tuple[tuple[str, float, int, float, int, float, float], ...] = (
+    ("Brief", 48.0, 12400, 0.057, 3, 258.3, 387.1),
+    ("Mem0", 24.2, 45235, 0.2081, 4, 1869.2, 53.5),
+    ("Zep", 32.6, 45942, 0.2113, 4, 1409.3, 70.96),
+    ("Supermemory", 30.3, 46342, 0.2132, 4, 1529.4, 65.38),
+    ("MemGPT", 30.3, 45541, 0.2095, 4, 1503.0, 66.53),
+    ("GraphRAG", 28.1, 48382, 0.2226, 4, 1721.8, 58.08),
+    ("A-Mem", 32.6, 45250, 0.2082, 4, 1388.0, 72.04),
+    ("RAPTOR", 26.6, 48167, 0.2216, 4, 1810.8, 55.22),
+    ("ContextQ", 34.0, 45049, 0.2072, 4, 1325.0, 75.47),
+    ("Unabyss", 29.0, 47768, 0.2197, 4, 1647.2, 60.71),
+    ("ctx|", 31.1, 46290, 0.2129, 4, 1488.4, 67.19),
+    ("Driver", 31.7, 46512, 0.214, 3, 1467.3, 68.15),
+    ("Oiya", 27.3, 50298, 0.2314, 4, 1842.4, 54.28),
+    ("Kluris", 23.6, 51289, 0.2359, 4, 2173.3, 46.01),
+    ("Oracle Summary", 34.3, 44767, 0.2059, 4, 1305.2, 76.62),
+    ("OpenViking", 29.2, 47972, 0.2207, 4, 1642.9, 60.87),
+)
+
+
+class TestBlendedRateGpt4o:
+    """The gpt-4o blended rate reproduces every USD in tab:tok_agent_economics."""
+
+    @pytest.mark.parametrize("row", _ECON_ROWS, ids=[r[0] for r in _ECON_ROWS])
+    def test_blended_rate_reproduces_published_usd(
+        self, row: tuple[str, float, int, float, int, float, float]
+    ) -> None:
+        _system, _res, session_tok, usd, decimals, *_ = row
+        computed = session_blended_cost("gpt-4o", session_tok)
+        assert abs(computed - usd) <= _usd_tol(decimals)
+
+
+class TestBlendedRateUniqueness:
+    """The published rates are the unique cent-level rates that fit every row."""
+
+    def test_gpt55_rate_is_12_dollars(self) -> None:
+        assert SESSION_BLENDED_RATE_PER_MTOK["gpt-5.5"].per_mtok == 12.00
+
+    def test_gpt4o_rate_is_4_60_dollars(self) -> None:
+        assert SESSION_BLENDED_RATE_PER_MTOK["gpt-4o"].per_mtok == 4.60
+
+    def test_neighbouring_gpt55_rates_break_a_row(self) -> None:
+        # $11.99 mis-rounds the 2172-tok row; $12.01 mis-rounds the 3686-tok row.
+        assert round(2172 * 11.99e-6, 4) != 0.0261
+        assert round(3686 * 12.01e-6, 4) != 0.0442
+        # ... while $12.00 gets both right.
+        assert round(2172 * 12.00e-6, 4) == 0.0261
+        assert round(3686 * 12.00e-6, 4) == 0.0442
+
+    def test_rates_are_flagged_verified_against_their_table(self) -> None:
+        assert (
+            SESSION_BLENDED_RATE_PER_MTOK["gpt-5.5"].source_table == "tab:tok_agent_context_gpt55"
+        )
+        assert SESSION_BLENDED_RATE_PER_MTOK["gpt-4o"].source_table == "tab:tok_agent_economics"
+        assert all(rate.verified for rate in SESSION_BLENDED_RATE_PER_MTOK.values())
+
+
+class TestPricingOmission:
+    """The paper names backend models but publishes no per-token price for them."""
+
+    def test_named_backends_have_no_invented_blended_rate(self) -> None:
+        # Only the two blended rates the paper's USD columns imply are priced; the
+        # individually-named backends (e.g. gpt-5.3-codex) are intentionally not.
+        unpriced = TOKECON_BACKEND_MODELS - set(SESSION_BLENDED_RATE_PER_MTOK)
+        assert "gpt-5.3-codex" in unpriced
+        assert "claude-opus-4-8" in unpriced
+        for model in unpriced:
+            with pytest.raises(KeyError, match="no blended session rate"):
+                session_blended_cost(model, 1000)
+
+
+class TestEconomicsIdentities:
+    """tok-per-resolved-point and efficiency-score columns of tab:tok_agent_economics."""
+
+    @pytest.mark.parametrize("row", _ECON_ROWS, ids=[r[0] for r in _ECON_ROWS])
+    def test_tokens_per_resolved_point(
+        self, row: tuple[str, float, int, float, int, float, float]
+    ) -> None:
+        _system, res, session_tok, _usd, _d, tprp, _eff = row
+        # session_tokens / resolution% (Brief: 12400/48.0 = 258.3). Paper prints 1 dp.
+        assert tokens_per_resolved_point(session_tok, res) == pytest.approx(tprp, abs=0.05)
+
+    @pytest.mark.parametrize("row", _ECON_ROWS, ids=[r[0] for r in _ECON_ROWS])
+    def test_efficiency_score(self, row: tuple[str, float, int, float, int, float, float]) -> None:
+        _system, res, session_tok, _usd, _d, _tprp, eff = row
+        # 1e5 * resolution% / session_tokens (Brief: 1e5*48.0/12400 = 387.1).
+        assert efficiency_score(res, session_tok) == pytest.approx(eff, abs=0.05)
+
+    def test_efficiency_is_reciprocal_of_tok_per_point_up_to_scale(self) -> None:
+        # eff = 1e5 * res / tok ; tprp = tok / res ; so eff * tprp == 1e5 exactly.
+        for _system, res, session_tok, *_ in _ECON_ROWS:
+            eff = efficiency_score(res, session_tok)
+            tprp = tokens_per_resolved_point(session_tok, res)
+            assert eff * tprp == pytest.approx(1e5, rel=1e-12)
+
+    def test_domain_guards(self) -> None:
+        with pytest.raises(ValueError, match="resolution_pct"):
+            tokens_per_resolved_point(1000, 0.0)
+        with pytest.raises(ValueError, match="resolution_pct"):
+            tokens_per_resolved_point(1000, 101.0)
+        with pytest.raises(ValueError, match="session_tokens"):
+            efficiency_score(30.0, 0)
 
 
 class TestPaperTurnLedgerGpt55:
