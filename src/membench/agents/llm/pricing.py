@@ -11,7 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["PRICING", "ModelPricing", "price_dollars"]
+__all__ = [
+    "PAPER_SESSION_RATES",
+    "PRICING",
+    "BlendedSessionRate",
+    "ModelPricing",
+    "blended_session_dollars",
+    "price_dollars",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +43,65 @@ PRICING: dict[str, ModelPricing] = {
     # between arms (driven by retrieved-context size) are visible and comparable.
     "stub": ModelPricing(1.00, 5.00),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class BlendedSessionRate:
+    """A flat (input/output-blended) dollar rate per million session tokens.
+
+    The paper's token-economics tables (``sec:tokecon``) publish *session
+    tokens* and *USD* without an input/output split, so the only price they
+    state is a blended per-session-token rate. These rates are implied by the
+    published rows themselves — ``usd_per_mtok`` is the constant that
+    reproduces every USD cell of the cited table from its token cell at the
+    printed precision — not vendor quotes; ``provenance`` names the exact table.
+    """
+
+    usd_per_mtok: float
+    provenance: str
+
+
+PAPER_SESSION_RATES: dict[str, BlendedSessionRate] = {
+    # tab:tok_agent_context_gpt55 ("Multi-turn collapse, one fixed backend
+    # model (GPT-5.5)"): all 8 rows satisfy USD == session_tok x $12.00/Mtok at
+    # the printed precision, e.g. 1835 tok x 12e-6 = $0.02202 -> printed $0.022
+    # and 4737 x 12e-6 = $0.056844 -> printed $0.0568. The caption states the
+    # model and "its per-token price are identical across rows".
+    "gpt-5.5": BlendedSessionRate(12.00, "tab:tok_agent_context_gpt55"),
+    # tab:tok_agent_economics ("Quality x cost across context layers", USD
+    # (gpt-4o) column): all 16 rows satisfy USD == session_tok x $4.60/Mtok at
+    # the printed precision, e.g. Brief 12400 x 4.6e-6 = $0.05704 -> printed
+    # $0.057 and Kluris 51289 x 4.6e-6 = $0.2359294 -> printed $0.2359.
+    "gpt-4o": BlendedSessionRate(4.60, "tab:tok_agent_economics"),
+}
+"""Blended session rates implied by the paper's own token-economics tables.
+
+Deliberate omissions (integrity note): the sweep's other backend models named in
+``sec:tokecon`` / ``tab:tok_context_brief_losses`` — GPT-5.3 Codex, Claude Opus
+4.8, Mistral Large 3, Gemini 3.5 Flash, Composer 2.5, and Kimi K2.5 — appear
+only with token counts, never with a USD column, so no paper price exists for
+them and none is invented here. (Claude Opus 4.8 has a vendor-sourced
+input/output row in :data:`PRICING`; that is Anthropic's published price, not a
+paper-stated one, and the two tables are kept separate for exactly that reason.)
+"""
+
+
+def blended_session_dollars(model: str, session_tokens: int) -> float:
+    """Dollar cost of a session under the paper-implied blended rate.
+
+    ``session_tokens`` is the prompt+completion total across all turns (the
+    "Session tok." column). Raises ``KeyError`` for models the paper does not
+    price (fail loud rather than silently zero-cost, matching
+    :func:`price_dollars`).
+    """
+    if session_tokens < 0:
+        raise ValueError("session_tokens must be non-negative")
+    if model not in PAPER_SESSION_RATES:
+        raise KeyError(
+            f"the paper states no blended session rate for model {model!r}; "
+            f"known: {sorted(PAPER_SESSION_RATES)}"
+        )
+    return session_tokens * PAPER_SESSION_RATES[model].usd_per_mtok / 1_000_000
 
 
 def price_dollars(model: str, input_tokens: int, output_tokens: int) -> float:
