@@ -225,3 +225,39 @@ SELECT CASE WHEN (
   SELECT COUNT(*) FROM walk WHERE node IN ('d-gov-1-e', 'd-gov-2-e', 'd-gov-3-e')
 ) = 0 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 3 -- Reachable-set invariants for the LINKED graph.
+--   Anchor: sec:struct (bounded traversal returns exactly the connected typed
+--   neighbourhood; scattered-area distractors stay out).
+-- ---------------------------------------------------------------------------
+-- Within 3 confidence-gated hops of q-task, exactly 6 distinct nodes are
+-- reachable besides the start (d-gov-1..3, dx-ui-1, dx-ui-2, dx-perf-1), and the
+-- ISOLATED area (dx-iso-1, dx-iso-2) is never touched.
+CREATE TABLE _assert_reachable_count (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_reachable_count
+SELECT CASE WHEN (
+  WITH RECURSIVE walk(node, depth) AS (
+      SELECT 'q-task', 0
+    UNION
+      SELECT e.target_entity_object_id, walk.depth + 1
+      FROM walk
+      JOIN entity_link e ON e.source_entity_object_id = walk.node
+      WHERE walk.depth < 3 AND e.confidence >= 0.5
+  )
+  SELECT COUNT(DISTINCT node) FROM walk WHERE node <> 'q-task'
+) = 6 THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_isolated_area_unreached (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_isolated_area_unreached
+SELECT CASE WHEN (
+  WITH RECURSIVE walk(node, depth) AS (
+      SELECT 'q-task', 0
+    UNION
+      SELECT e.target_entity_object_id, walk.depth + 1
+      FROM walk
+      JOIN entity_link e ON e.source_entity_object_id = walk.node
+      WHERE walk.depth < 3 AND e.confidence >= 0.5
+  )
+  SELECT COUNT(*) FROM walk WHERE node IN ('dx-iso-1', 'dx-iso-2')
+) = 0 THEN 1 ELSE 0 END;
+
