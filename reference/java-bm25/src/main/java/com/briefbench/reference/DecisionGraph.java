@@ -337,6 +337,21 @@ public final class DecisionGraph {
     }
 
     /**
+     * Structured (bounded-traversal) recovery ceiling (Thm thm:struct, eq:struct):
+     * {@code P_struct(d) = q^d}, the steady per-hop cost a typed store pays to follow
+     * {@code d} stored links (no super-geometric M_d penalty). This is the counterpart
+     * to {@link #similarityRecovery}: over a depth-{@code d} governance chain a
+     * link-follower survives with {@code q^d} while flat similarity collapses as
+     * {@code s0^d * rho^(d(d+1)/2)}. Golden (pack A.2): structuredRecovery(5, 0.95) =
+     * 0.95^5; at q=0.97, d=3 -&gt; 0.912673, d=5 -&gt; 0.8587340256999999.
+     */
+    public static double structuredRecovery(int d, double q) {
+        requireDepth(d);
+        requireFidelity(q);
+        return Math.pow(q, d);
+    }
+
+    /**
      * Scatter factor {@code p^sigma}, p in (0,1], sigma &gt;= 0 (fractional allowed).
      * {@code p^0 = 1} (typed dereference, no scatter), {@code p^1 = p}.
      * Golden: scatterFactor(0.5, 3) = 0.5^3 = 0.125.
@@ -398,6 +413,17 @@ public final class DecisionGraph {
     /** A typed dereference collapses scatter to a single probe (sigma -&gt; 1). */
     public static int probesForDereference() {
         return 1;
+    }
+
+    /**
+     * Scatter charged to a flat-similarity retriever over a depth-{@code d} governance
+     * chain: {@code sigma = d} (Thm thm:scatter, "flat similarity split over a chain
+     * pays sigma = d"). A typed dereference of the same chain pays 1
+     * ({@link #probesForDereference}).
+     */
+    public static int scatterForFlatChain(int d) {
+        requireDepth(d);
+        return d;
     }
 
     /**
