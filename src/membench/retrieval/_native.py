@@ -21,8 +21,12 @@ from numpy.typing import NDArray
 __all__ = [
     "cosine_topk_native",
     "cosine_topk_reference",
+    "crossover_search_native",
+    "gap_native",
     "native_available",
     "native_library_path",
+    "similarity_recovery_native",
+    "structured_recovery_native",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -65,6 +69,22 @@ def _load() -> ctypes.CDLL | None:
         ctypes.c_int,  # k
         ctypes.POINTER(ctypes.c_int),  # out_idx
         ctypes.POINTER(ctypes.c_float),  # out_score
+    ]
+    # Depth-theory kernels (membench.theory.*). Scalar double in/out; restype
+    # MUST be set or ctypes truncates the return to a C int.
+    lib.mb_similarity_recovery.restype = ctypes.c_double
+    lib.mb_similarity_recovery.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_int]
+    lib.mb_structured_recovery.restype = ctypes.c_double
+    lib.mb_structured_recovery.argtypes = [ctypes.c_double, ctypes.c_int]
+    lib.mb_gap.restype = ctypes.c_double
+    lib.mb_gap.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.mb_crossover_search.restype = ctypes.c_int
+    lib.mb_crossover_search.argtypes = [
+        ctypes.c_double,  # s0
+        ctypes.c_double,  # rho
+        ctypes.c_double,  # q
+        ctypes.c_double,  # tau
+        ctypes.c_int,  # max_d
     ]
     _LIB = lib
     return lib
@@ -130,3 +150,51 @@ def cosine_topk_native(
         out_score.ctypes.data_as(c_float_p),
     )
     return out_idx.astype(np.int64), out_score.astype(np.float64)
+
+
+def _require_lib() -> ctypes.CDLL:
+    lib = _load()
+    if lib is None:
+        raise RuntimeError("native kernel not available; build native/c or use the reference")
+    return lib
+
+
+def similarity_recovery_native(s0: float, rho: float, d: int) -> float:
+    r"""Native ``P_sim(d) = s0^d * rho^{d(d+1)/2}`` (paper eq:simceiling).
+
+    Parity mirror of :func:`membench.theory.recovery.similarity_recovery`. Raises
+    ``RuntimeError`` if the native library is not built (gate on
+    :func:`native_available`).
+    """
+    return float(_require_lib().mb_similarity_recovery(s0, rho, d))
+
+
+def structured_recovery_native(q: float, d: int) -> float:
+    r"""Native ``P_struct(d) = q^d`` (paper Thm thm:struct).
+
+    Parity mirror of :func:`membench.theory.recovery.structured_recovery`.
+    """
+    return float(_require_lib().mb_structured_recovery(q, d))
+
+
+def gap_native(s0: float, rho: float, q: float, d: float) -> float:
+    r"""Native structured-advantage gap ``g(d) = q^d - s0^d rho^{d(d+1)/2}``.
+
+    Paper eq:gd. Continuous ``d`` allowed, matching
+    :func:`membench.theory.crossover.g`.
+    """
+    return float(_require_lib().mb_gap(s0, rho, q, d))
+
+
+def crossover_search_native(
+    s0: float, rho: float, q: float, tau: float, max_d: int
+) -> int | None:
+    r"""Native crossover depth ``d*`` (paper prop:cross).
+
+    Smallest integer ``d`` in ``[1, max_d]`` with ``g(d) > tau``, or ``None`` when
+    structure never clears the overhead on the scanned range. Parity mirror of
+    :func:`membench.theory.crossover.find_crossover_depth`'s ``d_star`` (the C
+    kernel returns 0 for the no-crossover case, mapped to ``None`` here).
+    """
+    result = int(_require_lib().mb_crossover_search(s0, rho, q, tau, max_d))
+    return result if result != 0 else None
