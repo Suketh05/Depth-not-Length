@@ -74,4 +74,28 @@ public final class Crossover {
             double d, Recovery.Model model, double taskValue, double maintenanceCost) {
         return taskValue * g(d, model) - maintenanceCost;
     }
+
+    /**
+     * Continuous zero-overhead crossover {@code d0}, the nonzero root of the
+     * log-advantage parabola, i.e. the depth where {@code P_struct(d) = P_sim(d)}
+     * (bounds.py::tau_zero_crossover):
+     * <pre>  d0 = 2*ln(q/s0)/ln(rho) - 1.  </pre>
+     * For {@code d > d0} structured recovery exceeds similarity recovery; below it,
+     * similarity wins. At the paper calibration {@code d0 = -2.629133632756974}, so
+     * structure already wins at {@code d = 1}.
+     *
+     * @throws IllegalArgumentException if the model does not decay ({@code rho >= 1}),
+     *     so the quadratic depth-ceiling argument does not apply
+     */
+    public static double tauZeroCrossover(Recovery.Model model) {
+        if (!model.isDecaying()) {
+            throw new IllegalArgumentException(
+                    "crossover bounds require a decaying similarity model (rho < 1), got rho="
+                            + model.rho());
+        }
+        double lnQ = Math.log(model.q());
+        double lnS0 = Math.log(model.s0());
+        double lnRho = Math.log(model.rho());
+        return 2.0 * (lnQ - lnS0) / lnRho - 1.0;
+    }
 }
