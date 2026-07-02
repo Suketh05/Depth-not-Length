@@ -195,9 +195,7 @@ def gap_native(s0: float, rho: float, q: float, d: float) -> float:
     return float(_require_lib().mb_gap(s0, rho, q, d))
 
 
-def crossover_search_native(
-    s0: float, rho: float, q: float, tau: float, max_d: int
-) -> int | None:
+def crossover_search_native(s0: float, rho: float, q: float, tau: float, max_d: int) -> int | None:
     r"""Native crossover depth ``d*`` (paper prop:cross).
 
     Smallest integer ``d`` in ``[1, max_d]`` with ``g(d) > tau``, or ``None`` when

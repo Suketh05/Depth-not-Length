@@ -206,9 +206,7 @@ class TestNativeStatsParity:
         [(8, 10), (6, 8), (60, 100), (0, 10), (10, 10), (6.5, 8.0), (344, 604)],
     )
     @pytest.mark.parametrize("confidence", [0.90, 0.95, 0.99])
-    def test_wilson_parity(
-        self, successes: float, trials: float, confidence: float
-    ) -> None:
+    def test_wilson_parity(self, successes: float, trials: float, confidence: float) -> None:
         ref_low, ref_high = wilson_interval(successes, trials, confidence=confidence)
         nat_low, nat_high = wilson_interval_native(successes, trials, confidence=confidence)
         assert abs(nat_low - ref_low) <= _PARITY_TOL
