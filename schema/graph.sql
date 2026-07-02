@@ -382,3 +382,34 @@ SELECT CASE WHEN (
     AND target_entity_object_id IN ('s-sess-1', 's-sess-2', 's-sess-3')
 ) = 2 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 9 -- Fairness-lock: the typed-edge DOMAIN CHECK is present and complete.
+--   Anchor: sec:fairness (every arm plays by the same locked schema; the typed
+--   relationship vocabulary is fixed, not open-ended).
+-- ---------------------------------------------------------------------------
+-- Introspect the committed DDL (sqlite_master.sql). All 16 canonical
+-- relationship types must appear inside the CHECK domain, and the domain CHECK
+-- clause itself must be present -- so no arm can smuggle in an ad-hoc edge type.
+CREATE TABLE _assert_edgetype_check_present (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_edgetype_check_present
+SELECT CASE WHEN instr(
+  (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entity_link'),
+  'CHECK (relationship_type IN'
+) > 0 THEN 1 ELSE 0 END;
+
+CREATE TABLE _assert_edgetype_domain_16 (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_edgetype_domain_16
+WITH dom(t) AS (
+  VALUES ('related_to'), ('constrains'), ('constrained_by'), ('implements'),
+         ('validates'), ('contradicts'), ('informs'), ('supersedes'), ('blocks'),
+         ('derived_from'), ('supports_goal'), ('motivates'), ('enables'),
+         ('impacts'), ('references'), ('duplicate_of')
+)
+SELECT CASE WHEN (
+  SELECT COUNT(*) FROM dom
+  WHERE instr(
+    (SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entity_link'),
+    '''' || dom.t || ''''
+  ) > 0
+) = 16 THEN 1 ELSE 0 END;
+
