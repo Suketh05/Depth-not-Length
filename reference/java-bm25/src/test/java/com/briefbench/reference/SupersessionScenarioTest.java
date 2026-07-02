@@ -105,6 +105,55 @@ class SupersessionScenarioTest {
         assertEquals(DecisionGraph.similaritySupersessionRecovery(n), empirical, 0.01);
     }
 
+    // ---- Bounded governance traversal: the typed per-hop mechanism ----
+
+    @Test
+    void typedStoreReachesGoverningDecisionInDHopsAtQPerHop() {
+        // A task at the surface (feature) is governed by a decision 3 causal hops away:
+        //   feature --implements--> spec --constrains--> policy --supersedes--> old-policy
+        // The typed store follows the stored links and reaches the governing node in a
+        // bounded d=3 hops (steady per-hop cost q^d), where flat similarity would decay
+        // super-geometrically. We verify reachability + the q^d recovery golden.
+        DecisionGraph g = new DecisionGraph()
+                .addNode("feature", "add SSO login button")
+                .addNode("spec", "SSO uses OIDC")
+                .addNode("policy", "tokens are short-lived")
+                .addNode("old-policy", "tokens live 24h")
+                .addEdge("feature", "spec", DecisionGraph.RelationshipType.IMPLEMENTS, 0.90)
+                .addEdge("spec", "policy", DecisionGraph.RelationshipType.CONSTRAINS, 0.85)
+                .addEdge("policy", "old-policy", DecisionGraph.RelationshipType.SUPERSEDES, 0.80);
+
+        Map<String, Integer> reached = g.traverse("feature", 3, 0.5);
+        assertEquals(0, reached.get("feature"));
+        assertEquals(1, reached.get("spec"));
+        assertEquals(2, reached.get("policy"));
+        assertEquals(3, reached.get("old-policy"));
+
+        // A 2-hop budget stops before the governing decision at depth 3.
+        Map<String, Integer> shallow = g.traverse("feature", 2, 0.5);
+        assertFalse(shallow.containsKey("old-policy"));
+        assertEquals(2, shallow.get("policy"));
+
+        // Per-hop structured recovery over d hops is q^d (Thm thm:struct).
+        // q=0.97, d=3 -> 0.912673 (golden pack A.2).
+        assertEquals(0.912673, DecisionGraph.structuredRecovery(3, 0.97), 1e-12);
+        // structured_recovery(5, 0.95) == 0.95^5 (golden pack A.2).
+        assertEquals(Math.pow(0.95, 5), DecisionGraph.structuredRecovery(5, 0.95), 1e-12);
+    }
+
+    @Test
+    void confidenceGateBoundsTraversal() {
+        // Same chain, but the spec->policy link is only weakly inferred (0.30). A 0.5
+        // gate truncates the walk at spec; the governing policy is unreachable until the
+        // gate drops below 0.30. Mirrors the schema CTE's `e.confidence >= :min_confidence`.
+        DecisionGraph g = new DecisionGraph()
+                .addNode("feature", "f").addNode("spec", "s").addNode("policy", "p")
+                .addEdge("feature", "spec", DecisionGraph.RelationshipType.IMPLEMENTS, 0.90)
+                .addEdge("spec", "policy", DecisionGraph.RelationshipType.CONSTRAINS, 0.30);
+        assertFalse(g.traverse("feature", 3, 0.5).containsKey("policy"));
+        assertTrue(g.traverse("feature", 3, 0.25).containsKey("policy"));
+    }
+
     // ---- Golden closed forms (golden pack A.7, asserted verbatim) ----
 
     @Test
