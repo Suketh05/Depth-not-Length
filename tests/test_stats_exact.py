@@ -224,3 +224,34 @@ class TestMcNemarExactGolden:
         assert isinstance(res, McNemarExactResult)
         assert (res.b, res.c) == (2, 8)
         assert res.method == "mcnemar_exact"
+
+
+class TestMcNemarMidP:
+    """Mid-p variant golden, hand-computed on the same b=2, c=8 table.
+
+    The mid-p correction counts only half the probability of the observed
+    count (Lancaster 1961):
+
+        mid_p = 2 * (P(X < 2) + 0.5 * P(X = 2))
+              = 2 * (C(10,0) + C(10,1) + 0.5 * C(10,2)) / 1024
+              = 2 * (1 + 10 + 22.5) / 1024
+              = 67 / 1024
+              = 0.0654296875  exactly (dyadic, so == with no tolerance).
+
+    Equivalently mid_p = p_exact - P(X = 2) = 112/1024 - 45/1024 = 67/1024.
+    """
+
+    def test_mid_p_golden(self) -> None:
+        res = mcnemar_exact(2, 8)
+        assert res.mid_p == 67 / 1024
+        assert res.mid_p == 0.0654296875  # exact float equality
+
+    def test_mid_p_is_exact_minus_observed_pmf(self) -> None:
+        # Second derivation of the same number: subtract pmf(2) = 45/1024.
+        res = mcnemar_exact(2, 8)
+        assert res.p_value - res.mid_p == 45 / 1024
+
+    @pytest.mark.parametrize(("b", "c"), [(0, 5), (1, 9), (2, 8), (3, 7), (5, 5), (10, 30)])
+    def test_mid_p_never_exceeds_exact_p(self, b: int, c: int) -> None:
+        res = mcnemar_exact(b, c)
+        assert 0.0 < res.mid_p <= res.p_value <= 1.0
