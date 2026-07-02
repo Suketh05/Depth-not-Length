@@ -263,7 +263,8 @@ _RATIONALE_TEMPLATES: dict[str, tuple[str, str]] = {
 _NEGATION_CUES = re.compile(
     r"\b(?:not|never|no|without|skip(?:s|ped|ping)?|ignor(?:e|es|ed|ing)|"
     r"avoid(?:s|ed|ing)?|omit(?:s|ted|ting)?|bypass(?:es|ed|ing)?|"
-    r"instead\s+of|rather\s+than)\b",
+    r"instead\s+of|rather\s+than)\b"
+    r"|n['\u2019]t\b",  # contractions: don't / won't / shouldn't (either apostrophe)
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")

@@ -108,6 +108,15 @@ class TestStubJudgeGoldens:
         answer = "There is no time to waste. Call withAuditLog() before streaming."
         assert StubComplianceJudge().judge(_case(AUDIT, answer)).compliant is True
 
+    def test_contraction_negations_are_cues(self) -> None:
+        # "don't"/"won't" negate without containing the bare word "not".
+        for answer in (
+            "We don't need withAuditLog() for this internal export.",
+            "This export won't call withAuditLog().",
+            "We shouldn\u2019t bother with withAuditLog() here.",  # curly apostrophe
+        ):
+            assert StubComplianceJudge().judge(_case(AUDIT, answer)).compliant is False
+
     def test_bare_id_fallback_honoured(self) -> None:
         verdict = StubComplianceJudge().judge(_case(ADR, "per D-3 we proceed", "D-3"))
         assert verdict.compliant is True
