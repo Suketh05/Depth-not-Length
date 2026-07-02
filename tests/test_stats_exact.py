@@ -390,3 +390,39 @@ class TestAgreementWithExistingMcnemar:
         new = mcnemar_exact_from_outcomes(correct_a, correct_b)
         assert new.p_value == pytest.approx(legacy.p_value, rel=1e-12)
         assert new.statistic == legacy.statistic  # both report b - c
+
+
+class TestHardeningCrossChecks:
+    """Exhaustive small-table scan and a third-party reference implementation."""
+
+    def test_mcnemar_matches_independent_rederivation_on_all_small_tables(self) -> None:
+        # Re-derive the doubled tail with math.comb *in the test* for every
+        # discordant table with b + c <= 12 -- an exhaustive, deterministic scan
+        # of 91 tables including all chance-floor and saturation cells.
+        for n in range(1, 13):
+            for b in range(n + 1):
+                c = n - b
+                k = min(b, c)
+                tail = sum(math.comb(n, i) for i in range(k + 1))
+                expected_p = min(1.0, 2.0 * tail / 2.0**n)
+                expected_mid = min(1.0, (2.0 * tail - math.comb(n, k)) / 2.0**n)
+                res = mcnemar_exact(b, c)
+                assert res.p_value == expected_p, (b, c)
+                assert res.mid_p == expected_mid, (b, c)
+
+    @pytest.mark.parametrize(
+        ("successes", "n"),
+        [(0, 5), (1, 5), (6, 8), (28, 40), (40, 40), (117, 120)],
+    )
+    @pytest.mark.parametrize("alpha", [0.05, 0.10])
+    def test_matches_statsmodels_beta_method(self, successes: int, n: int, alpha: float) -> None:
+        # statsmodels' proportion_confint(method="beta") is an independent
+        # Clopper-Pearson implementation maintained by a third party; the two
+        # must agree to floating precision on every cell (117/120 is the
+        # paper's merge-ready count from worked example (k)).
+        from statsmodels.stats.proportion import proportion_confint
+
+        res = clopper_pearson(successes, n, alpha=alpha)
+        sm_low, sm_high = proportion_confint(successes, n, alpha=alpha, method="beta")
+        assert res.low == pytest.approx(float(sm_low), abs=1e-14)
+        assert res.high == pytest.approx(float(sm_high), abs=1e-14)
