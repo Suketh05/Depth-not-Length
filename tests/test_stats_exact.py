@@ -86,3 +86,31 @@ class TestClopperPearsonBetaIdentity:
         narrow = clopper_pearson(8, 10, 0.05)
         assert wide.low <= narrow.low
         assert wide.high >= narrow.high
+
+
+class TestClopperPearsonValidation:
+    def test_single_trial(self) -> None:
+        # Smallest valid n. 1/1: lower = 0.025^(1/1) = 0.025 exactly, upper = 1.
+        ci = clopper_pearson(1, 1, 0.05)
+        assert ci.low == pytest.approx(0.025, abs=1e-12)
+        assert ci.high == 1.0
+        # 0/1: lower = 0, upper = 1 - 0.025 = 0.975 exactly.
+        ci0 = clopper_pearson(0, 1, 0.05)
+        assert ci0.low == 0.0
+        assert ci0.high == pytest.approx(0.975, abs=1e-12)
+
+    def test_rejects_out_of_range_successes(self) -> None:
+        with pytest.raises(ValueError, match="successes"):
+            clopper_pearson(11, 10)
+        with pytest.raises(ValueError, match="successes"):
+            clopper_pearson(-1, 10)
+
+    def test_rejects_non_positive_n(self) -> None:
+        with pytest.raises(ValueError, match="at least 1"):
+            clopper_pearson(0, 0)
+
+    def test_rejects_out_of_range_alpha(self) -> None:
+        with pytest.raises(ValueError, match="alpha"):
+            clopper_pearson(5, 10, 0.0)
+        with pytest.raises(ValueError, match="alpha"):
+            clopper_pearson(5, 10, 1.0)
