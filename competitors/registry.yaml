@@ -70,3 +70,31 @@ claims:
     conditions: "Microsoft GraphRAG paper; LLM-judged comprehensiveness; VERIFY exact figure"
     accessed: "2026-06-18"
     needs_citation: true
+
+  # --- Vendor-reported rows the paper's landscape table cites (tab:landscape) --
+  # These two rows complete the five-system landscape table (Table tab:landscape:
+  # Mem0 66.9, Zep 94.8, GraphRAG 77.5, Supermemory 59.7, MemGPT 93.4). Values are
+  # transcribed verbatim from tab:landscape ("score" -> value; "vs base" ->
+  # baseline_value), each a self-reported number under the vendor's own benchmark,
+  # baseline, and model. They remain Tier-2 and are never mixed with our measured
+  # (Tier-1) numbers -- exactly the separation the paper draws around tab:landscape.
+  - system: MemGPT
+    category: paged_memory_os
+    metric: deep_memory_retrieval_accuracy
+    value: 93.4
+    baseline_value: null
+    unit: percent
+    source_url: https://arxiv.org/abs/2310.08560
+    conditions: "MemGPT/Letta, Deep Memory Retrieval (DMR); self-reported; tab:landscape score 93.4 (no vs-base reported)"
+    accessed: "2026-06-18"
+    needs_citation: false
+  - system: Supermemory
+    category: managed_long_term_store
+    metric: locomo_precision_at_one
+    value: 59.7
+    baseline_value: 34.4
+    unit: percent
+    source_url: "https://supermemory.ai (LoCoMo & SWE-ContextBench evaluations, self-reported; cited as tab:landscape)"
+    conditions: "Supermemory LoCoMo precision-at-one, P@1 (self-reported); tab:landscape score 59.7, vs base 34.4; VERIFY primary source before publication"
+    accessed: "2026-06-18"
+    needs_citation: true
