@@ -196,3 +196,30 @@ pava_increasing <- function(y, w = rep(1, length(y))) {
 pava_decreasing <- function(y, w = rep(1, length(y))) {
   rev(pava_increasing(rev(y), rev(w)))
 }
+
+# Golden pack C.3: non-decreasing fit of [1,2,3,2,1] -> [1,2,2,2,2]
+#   (blocks [1],[2],[3]; add 2: 3>2 -> pool 2.5; add 1: 2.5>1 -> pool 2.0).
+# Non-increasing fit (mirror) -> [2,2,2,2,1].
+iso_in <- c(1, 2, 3, 2, 1)
+iso_up <- pava_increasing(iso_in)
+iso_dn <- pava_decreasing(iso_in)
+assert_true(iso_up == c(1, 2, 2, 2, 2), "PAVA:increasing[1,2,2,2,2]")
+assert_true(iso_dn == c(2, 2, 2, 2, 1), "PAVA:decreasing[2,2,2,2,1]")
+# Sum-preserving invariant (both fits keep the total).
+assert_close(sum(iso_up), sum(iso_in), 1e-12, "PAVA:sum-preserved-up")
+assert_close(sum(iso_dn), sum(iso_in), 1e-12, "PAVA:sum-preserved-dn")
+# Idempotence: refitting an already-isotonic sequence is a no-op.
+assert_true(pava_increasing(iso_up) == iso_up, "PAVA:idempotent")
+# Weighted pooling: values [2,0], weights [1,3] -> pooled mean (2*1+0*3)/4=0.5.
+iso_w <- pava_increasing(c(2, 0), c(1, 3))
+assert_true(iso_w == c(0.5, 0.5), "PAVA:weighted[0.5,0.5]")
+# R^2_iso on [1,2,3,2,1] (increasing): mean 1.8, SS_total 2.8, SS_resid 2.0 -> 2/7.
+iso_mu <- mean(iso_in)
+ss_total <- sum((iso_in - iso_mu)^2)
+ss_resid <- sum((iso_in - iso_up)^2)
+r2_iso <- 1 - ss_resid / ss_total
+assert_close(ss_total, 2.8, 1e-12, "PAVA:SS_total=2.8")
+assert_close(ss_resid, 2.0, 1e-12, "PAVA:SS_resid=2.0")
+assert_close(r2_iso, 2 / 7, 1e-12, "PAVA:R2_iso=2/7")
+cat(sprintf("PASS (3) PAVA isotonic: up=[%s] dn=[%s] R2_iso=%.16g\n",
+            paste(iso_up, collapse = ","), paste(iso_dn, collapse = ","), r2_iso))
