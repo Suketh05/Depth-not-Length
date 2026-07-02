@@ -482,3 +482,17 @@ SELECT CASE WHEN instr(
   'CHECK (source_entity_object_id <> target_entity_object_id)'
 ) > 0 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- SUITE COMPLETE. If sqlite3 reached here with exit 0, every _assert_* CHECK
+-- held: bounded traversal recovers the depth-3 governing decision (thm:struct),
+-- similarity decays super-geometrically to a ~29x gap (thm:sim / sec:depth),
+-- the capture lever gates recovery (sec:capture), supersession resolves to the
+-- current version while a similarity proxy stays stale (tab:super), and the
+-- fairness-lock CHECK domains are enforced (sec:fairness).
+--
+-- Provenance: numeric goldens are VERBATIM from the golden pack (A.1 P_sim/P_struct
+-- table, A.7 supersession edge_hops); no value here was produced by running the
+-- reference implementation. To reproduce: sqlite3 ":memory:" < schema/graph.sql
+-- (exit 0 = all pass). To confirm the assertions bite, flip any expected literal
+-- and observe a non-zero exit (CHECK constraint failed).
+-- ---------------------------------------------------------------------------
