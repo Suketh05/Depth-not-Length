@@ -236,3 +236,37 @@ def test_rust_wilson_interval_matches_python(
     low, high = membench_kernels.wilson_interval(successes, trials, confidence)
     assert low == pytest.approx(ref_low, abs=1e-12, rel=0)
     assert high == pytest.approx(ref_high, abs=1e-12, rel=0)
+
+
+# ---------------------------------------------------------------------------
+# verify.rs parity: seeded randomized sweep (beyond the fixed goldens)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("seed", [0, 1, 7, 13, 42])
+def test_rust_parity_randomized_sweep(seed: int) -> None:
+    import membench_kernels
+
+    rng = np.random.default_rng(seed)
+    for _ in range(40):
+        s0 = float(rng.uniform(0.3, 1.0))
+        rho = float(rng.uniform(0.3, 0.99))
+        q = float(rng.uniform(0.5, 1.0))
+        d = int(rng.integers(1, 12))
+        decay = SimilarityDecayModel(s0=s0, rho=rho)
+
+        assert membench_kernels.similarity_recovery(d, s0, rho) == pytest.approx(
+            similarity_recovery(d, decay), abs=1e-12, rel=0
+        )
+        assert membench_kernels.structured_recovery(d, q) == pytest.approx(
+            structured_recovery(d, q), abs=1e-12, rel=0
+        )
+
+        # Wilson over random fractional pooled counts and confidence levels.
+        trials = float(rng.uniform(1.0, 500.0))
+        successes = float(rng.uniform(0.0, trials))
+        confidence = float(rng.uniform(0.80, 0.995))
+        ref_low, ref_high = py_wilson_interval(successes, trials, confidence=confidence)
+        low, high = membench_kernels.wilson_interval(successes, trials, confidence)
+        assert low == pytest.approx(ref_low, abs=1e-12, rel=0)
+        assert high == pytest.approx(ref_high, abs=1e-12, rel=0)
