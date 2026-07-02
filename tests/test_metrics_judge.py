@@ -12,12 +12,16 @@ Goldens are hand-built:
 
 from __future__ import annotations
 
+import pytest
+
 from membench.metrics.judge import (
     DEFAULT_JUDGE_MODEL,
     ComplianceVerdict,
     Judge,
     JudgeConfig,
     StubJudge,
+    agreement_rate,
+    judge_vs_rule_agreement,
 )
 from membench.types import MemoryItem, Scorer, SpecVariant, Task
 
@@ -171,3 +175,83 @@ class TestVerdictRollup:
         assert verdict.verdicts == ()
         assert verdict.rate == 1.0
         assert verdict.compliant is True
+
+
+class TestAgreementRateArithmetic:
+    def test_perfect_agreement(self) -> None:
+        judge = [True, True, False, True, False]
+        rule = [True, True, False, True, False]
+        result = agreement_rate(judge, rule)
+        assert result.n_agree == 5
+        assert result.n_total == 5
+        assert result.rate == 1.0  # 5/5
+        assert result.judge_stricter == 0
+        assert result.rule_stricter == 0
+
+    def test_six_of_eight_agreement_wilson_verbatim(self) -> None:
+        # Hand-counted: indices 1 and 7 disagree (rule compliant, judge not) => the
+        # gaming-guard direction; 6 of 8 agree.
+        judge = [True, False, False, True, False, False, True, False]
+        rule = [True, True, False, True, False, False, True, True]
+        result = agreement_rate(judge, rule)
+        assert result.n_agree == 6
+        assert result.n_total == 8
+        assert result.rate == 0.75  # 6/8
+        assert result.judge_stricter == 2  # rule says yes, judge says no
+        assert result.rule_stricter == 0
+        # Wilson 95% on (6, 8) -- golden pack Section C.6 / E.1, verbatim.
+        assert result.ci == (0.40927543031016883, 0.9285207872478909)
+
+    def test_eight_of_ten_agreement_wilson_verbatim(self) -> None:
+        judge = [True] * 10
+        rule = [True] * 8 + [False, False]
+        result = agreement_rate(judge, rule)
+        assert result.n_agree == 8
+        assert result.n_total == 10
+        assert result.rate == 0.8  # 8/10
+        assert result.rule_stricter == 2  # judge says yes, rule says no
+        assert result.judge_stricter == 0
+        # Wilson 95% on (8, 10) -- golden pack Section C.6, verbatim.
+        assert result.ci == (0.49016247153664183, 0.9433178485456247)
+
+    def test_total_disagreement_is_a_chance_floor(self) -> None:
+        result = agreement_rate([True, False, True, False], [False, True, False, True])
+        assert result.n_agree == 0
+        assert result.rate == 0.0  # 0/4
+
+    def test_empty_agreement_is_vacuously_one_with_no_ci(self) -> None:
+        result = agreement_rate([], [])
+        assert result.n_total == 0
+        assert result.rate == 1.0
+        assert result.ci is None
+
+    def test_length_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="align"):
+            agreement_rate([True, False], [True])
+
+
+class TestJudgeVsRuleAgreementEndToEnd:
+    def test_gaming_guard_drives_the_only_disagreement(self) -> None:
+        # Enforced and absent answers agree with the rule scorer; the restated
+        # (gamed) answer is the one place the judge is stricter than the rule.
+        tasks = [_task(("D-001",)), _task(("D-001",)), _task(("D-001",))]
+        answers = [_ANSWER_ENFORCED, _ANSWER_RESTATED, _ANSWER_ABSENT]
+        result = judge_vs_rule_agreement(StubJudge(), tasks, answers)
+        assert result.n_total == 3
+        assert result.n_agree == 2  # enforced + absent agree; restated does not
+        assert result.rate == pytest.approx(2 / 3)
+        assert result.judge_stricter == 1
+        assert result.rule_stricter == 0
+
+    def test_pure_assertion_rubric_agrees_with_rule_by_construction(self) -> None:
+        # Disabling the gaming guard makes the stub judge identical to the
+        # rule-based scorer, so agreement is 1.0 on the same three answers.
+        tasks = [_task(("D-001",)), _task(("D-001",)), _task(("D-001",))]
+        answers = [_ANSWER_ENFORCED, _ANSWER_RESTATED, _ANSWER_ABSENT]
+        result = judge_vs_rule_agreement(StubJudge(require_enforcement=False), tasks, answers)
+        assert result.n_agree == 3
+        assert result.rate == 1.0
+
+    def test_tasks_answers_length_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="align"):
+            judge_vs_rule_agreement(StubJudge(), [_task(("D-001",))], [])
