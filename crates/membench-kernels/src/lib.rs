@@ -7,8 +7,15 @@
 //! test against the reference (see `tests/test_rust_kernel.py`), which runs in CI
 //! once the extension is built with maturin. The Python layer falls back to the C
 //! kernel or NumPy when this extension is absent, so it is purely optional.
+//!
+//! The [`verify`] module adds a second family of kernels that re-derive the paper's
+//! theory and retrieval-scoring closed forms (recovery bounds, crossover, BM25+,
+//! reciprocal rank fusion, Wilson interval) as an independent cross-language witness
+//! of the published identities; see `crates/membench-kernels/src/verify.rs`.
 
 use pyo3::prelude::*;
+
+mod verify;
 
 /// Dot product of two equal-length f32 slices (cosine, given L2-normalised inputs).
 #[inline]
@@ -59,6 +66,15 @@ fn cosine_topk(
 #[pymodule]
 fn membench_kernels(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cosine_topk, m)?)?;
+    // Theory-verification kernels (see `verify.rs`).
+    m.add_function(wrap_pyfunction!(verify::similarity_recovery, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::log_similarity_recovery, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::structured_recovery, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::recovery_gap, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::crossover_search, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::bm25_plus_scores, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::reciprocal_rank_fusion, m)?)?;
+    m.add_function(wrap_pyfunction!(verify::wilson_interval, m)?)?;
     m.add("__version__", "0.1.0")?;
     Ok(())
 }
