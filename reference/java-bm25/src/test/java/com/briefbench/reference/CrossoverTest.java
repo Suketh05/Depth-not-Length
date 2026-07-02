@@ -81,4 +81,67 @@ class CrossoverTest {
         assertTrue(Crossover.netValueGain(2, CAL, 8.0, 2.0) > 0.0); // g(2)=0.79 > 0.25
         assertTrue(Crossover.netValueGain(1, CAL, 8.0, 8.0) < 0.0); // g(1)=0.501 < tau=1.0
     }
+
+    // ---- A.3 closed-form crossover d0 and the calibrated win window ----
+
+    @Test
+    void zeroOverheadCrossoverIsTheGoldenD0() {
+        // Golden pack A.3: d0 = 2*ln(0.97/0.70)/ln(0.67) - 1 = -2.629133632756974.
+        assertEquals(-2.629133632756974, Crossover.tauZeroCrossover(CAL), TOL);
+    }
+
+    @Test
+    void closedFormCrossoverIsDepthOneAtTheCalibration() {
+        // d_lower = max(1, floor(d0) + 1) = max(1, floor(-2.629)+1) = max(1, -2) = 1:
+        // structure already wins at d = 1 since g(1) = 0.501 > 0 (prop:cross).
+        Crossover.CrossoverBounds b = Crossover.bracketCrossoverDepth(CAL, 0.0);
+        assertEquals(1, b.dLower());
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(CAL, 0.0);
+        assertTrue(r.exists());
+        assertEquals(1, r.dStar());
+    }
+
+    @Test
+    void continuousRootHasZeroGap() {
+        // d0 is the depth where P_struct(d) = P_sim(d), so g(d0) = 0 identically
+        // (even though d0 < 0 for this calibration).
+        double d0 = Crossover.tauZeroCrossover(CAL);
+        assertEquals(0.0, Crossover.g(d0, CAL), 1e-12);
+    }
+
+    @Test
+    void calibratedCrossoverIsDepthTwoInTheGoldenWindow() {
+        // Golden pack A.3: with strict-win semantics, d* = 2 exactly when
+        // g(1) <= tau < g(2), i.e. tau in [0.501, 0.7935261299999999).
+        // Points strictly inside the window (paper's "0.50 < tau <= 0.79"):
+        assertEquals(2, Crossover.findCrossoverDepth(CAL, 0.6).dStar());
+        assertEquals(2, Crossover.findCrossoverDepth(CAL, 0.79).dStar());
+        // Just below g(1): structure already wins at d = 1.
+        assertEquals(1, Crossover.findCrossoverDepth(CAL, 0.5).dStar());
+    }
+
+    @Test
+    void winWindowEndpointsArePinnedByG1AndG2() {
+        // The half-open window [g(1), g(2)) is pinned exactly by the computed edges:
+        // at tau = g(1) depth 1 no longer strictly wins so d* = 2; a hair below flips
+        // to d* = 1. At tau = g(2), depth 2 no longer wins so d* = 3.
+        double g1 = Crossover.g(1, CAL); // = 0.501
+        double g2 = Crossover.g(2, CAL); // = 0.7935261299999999
+        assertEquals(0.501, g1, TOL);
+        assertEquals(0.7935261299999999, g2, TOL);
+
+        assertEquals(2, Crossover.findCrossoverDepth(CAL, g1).dStar());
+        assertEquals(1, Crossover.findCrossoverDepth(CAL, Math.nextDown(g1)).dStar());
+        assertEquals(3, Crossover.findCrossoverDepth(CAL, g2).dStar());
+        assertEquals(2, Crossover.findCrossoverDepth(CAL, Math.nextDown(g2)).dStar());
+    }
+
+    @Test
+    void zeroOverheadCrossoverRejectsNonDecayingModel() {
+        // rho >= 1: the quadratic depth-ceiling argument does not apply.
+        assertThrows(IllegalArgumentException.class,
+                () -> Crossover.tauZeroCrossover(new Recovery.Model(0.7, 1.0, 0.9)));
+        assertThrows(IllegalArgumentException.class,
+                () -> Crossover.bracketCrossoverDepth(new Recovery.Model(0.7, 1.2, 0.9), 0.1));
+    }
 }
