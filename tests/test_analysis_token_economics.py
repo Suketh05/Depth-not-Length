@@ -22,14 +22,17 @@ import pytest
 
 from membench.analysis.token_economics import (
     DEFAULT_BRIEF_LAYER,
+    EFFICIENCY_SCALE,
     Matchup,
     MatchupOutcome,
     SessionRecord,
     WinRate,
     build_matchups,
+    efficiency_score,
     matchup_count,
     tally,
     tally_by_competitor,
+    tokens_per_resolved_point,
 )
 
 # --- Paper goldens: tab:tok_context_winrate ---------------------------------
@@ -388,3 +391,83 @@ class TestTally:
         overall = tally(matchups)
         assert sum(wr.wins for wr in by_competitor.values()) == overall.wins
         assert sum(wr.total for wr in by_competitor.values()) == overall.total
+
+
+class TestEfficiencyGoldens:
+    """Reproduce every row of tab:tok_agent_economics from published inputs."""
+
+    @pytest.mark.parametrize(
+        ("system", "resolution_pct", "session_tokens", "cost_per_point", "efficiency"),
+        ECONOMICS_ROWS,
+        ids=[row[0] for row in ECONOMICS_ROWS],
+    )
+    def test_row_reproduced(
+        self,
+        system: str,
+        resolution_pct: float,
+        session_tokens: int,
+        cost_per_point: float,
+        efficiency: float,
+    ) -> None:
+        rate = resolution_pct / 100.0
+        # Published values are 1--2 dp roundings of these ratios (abs 0.05).
+        assert tokens_per_resolved_point(rate, session_tokens) == pytest.approx(
+            cost_per_point, abs=0.05
+        )
+        assert efficiency_score(rate, session_tokens) == pytest.approx(efficiency, abs=0.05)
+
+    def test_brief_efficiency_full_precision(self) -> None:
+        # 1e7 * 0.48 / 12400 = 387.0967... -> published 387.1.
+        assert efficiency_score(0.48, 12400) == 1e7 * 0.48 / 12400
+        assert round(efficiency_score(0.48, 12400), 1) == 387.1
+        assert tokens_per_resolved_point(0.48, 12400) == 12400 / 48.0
+        assert round(tokens_per_resolved_point(0.48, 12400), 1) == 258.3
+
+    @pytest.mark.parametrize(
+        ("resolution_pct", "session_tokens"),
+        [(row[1], row[2]) for row in ECONOMICS_ROWS],
+        ids=[row[0] for row in ECONOMICS_ROWS],
+    )
+    def test_reciprocal_identity(self, resolution_pct: float, session_tokens: int) -> None:
+        # efficiency_score * tokens_per_resolved_point == EFFICIENCY_SCALE / 100.
+        rate = resolution_pct / 100.0
+        product = efficiency_score(rate, session_tokens) * tokens_per_resolved_point(
+            rate, session_tokens
+        )
+        assert product == pytest.approx(EFFICIENCY_SCALE / 100.0, rel=1e-12)
+        assert EFFICIENCY_SCALE / 100.0 == 1e5
+
+    def test_scale_default_and_override(self) -> None:
+        assert EFFICIENCY_SCALE == 1e7
+        # Doubling the scale doubles the score.
+        base = efficiency_score(0.5, 1000)
+        assert efficiency_score(0.5, 1000, scale=2e7) == pytest.approx(2 * base)
+
+    def test_chance_floor_and_saturation(self) -> None:
+        # A layer that never resolves scores 0 quality per token.
+        assert efficiency_score(0.0, 1000) == 0.0
+        # Full resolution at minimal spend maximises the score.
+        assert efficiency_score(1.0, 1) > efficiency_score(0.5, 1)
+
+    def test_domain_guards(self) -> None:
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            efficiency_score(1.5, 1000)
+        with pytest.raises(ValueError, match="strictly positive"):
+            efficiency_score(0.5, 0)
+        # tokens_per_resolved_point is undefined for a never-resolving layer.
+        with pytest.raises(ValueError, match=r"\(0, 1\]"):
+            tokens_per_resolved_point(0.0, 1000)
+        with pytest.raises(ValueError, match=r"\(0, 1\]"):
+            tokens_per_resolved_point(1.5, 1000)
+
+
+class TestMatchupCount:
+    def test_full_sweep(self) -> None:
+        assert matchup_count(12, 30, 10) == 3600
+
+    def test_zero_dimension(self) -> None:
+        assert matchup_count(0, 30, 10) == 0
+
+    def test_negative_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            matchup_count(-1, 30, 10)
