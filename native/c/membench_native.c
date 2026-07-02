@@ -169,3 +169,11 @@ double mb_wilson_high(double successes, double n, double z) {
   mb_wilson(successes, n, z, &low, &high);
   return high;
 }
+
+/*
+ * Cohen's h = 2*asin(sqrt(p1)) - 2*asin(sqrt(p2)). Paper fig:cohensh.
+ * Same asin/sqrt calls and left-to-right association as effect_size.cohens_h.
+ */
+double mb_cohens_h(double p1, double p2) {
+  return 2.0 * asin(sqrt(p1)) - 2.0 * asin(sqrt(p2));
+}
