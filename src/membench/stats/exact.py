@@ -1,14 +1,38 @@
 r"""Exact small-sample inference: Clopper--Pearson intervals and exact McNemar.
 
-The paper's boundary cells sit exactly where asymptotic inference breaks: at
-synthetic depth 3 the typed store recovers 40/40 chains (:math:`\hat p = 1`),
-so bootstrap and Wald intervals degenerate. The paper prescribes exact methods
-there -- worked examples (j) (Figure fig:chain) and (n) (Figure
-fig:supersession) in app:worked, and the fig:forest caption ("exact/score
-interval (Wilson/Clopper--Pearson) or McNemar exact"). This module implements
-those exact methods; the Wilson interval in
-:mod:`membench.metrics.factorization` remains the default away from the
-boundary.
+The paper's boundary cells sit exactly where asymptotic inference breaks. At
+synthetic depth 3 the typed store recovers 40/40 chains -- :math:`\hat p = 1` --
+so the Wald interval is degenerate, the BCa bootstrap collapses to a point, and
+even the Wilson score interval is only an approximation. The paper therefore
+prescribes *exact* methods at those cells, and this module implements them:
+
+* :func:`clopper_pearson` -- the exact (Clopper--Pearson 1934) binomial interval,
+  computed through the Beta-quantile formulation. Paper worked example (j)
+  (app:worked, Figure fig:chain): the chain-recovery product event at synthetic
+  d=3 is 40/40 for the typed store, giving the exact 95% interval
+  :math:`[(0.025)^{1/40}, 1] = [0.912, 1.000]`, versus bm25 at 28/40 giving
+  ``[0.534, 0.834]`` -- disjoint. Also worked example (n) (Figure
+  fig:supersession) and the chain-recovery metric definition in sec:metrics
+  ("Wilson/Clopper--Pearson CI").
+* :func:`mcnemar_exact` -- the exact (binomial) McNemar test on discordant pairs,
+  the test the fig:forest caption prescribes for boundary cells: "At boundary
+  cells (Brief 40/40, p=1.0) the BCa interval is degenerate, so those contrasts
+  should be read with an exact/score interval (Wilson/Clopper--Pearson) or
+  McNemar exact." A mid-p variant (Lancaster 1961) is reported alongside the
+  strictly conservative doubled-tail p-value.
+* :func:`mcnemar_exact_from_outcomes` -- the same test driven directly from two
+  paired per-task correctness vectors, matching the calling convention of
+  :func:`membench.stats.hypothesis.mcnemar_test`.
+
+Why exact and not Wilson? Clopper--Pearson inverts the binomial tail itself, so
+its coverage is *guaranteed* to be at least the nominal level for every ``n`` and
+every true ``p`` (it is conservative by construction) and its limits never leave
+``[0, 1]`` -- precisely the properties the paper leans on at :math:`\hat p = 1`
+(worked example (j): "Clopper--Pearson never produces a limit outside [0,1] and
+is conservative by construction"). The existing :mod:`membench.metrics.factorization`
+Wilson interval remains the default away from the boundary; this module is the
+exact companion for the cells where the paper says the score interval is not
+enough.
 
 References
 ----------
@@ -16,6 +40,10 @@ Clopper, C. J. & Pearson, E. S. (1934). "The use of confidence or fiducial
 limits illustrated in the case of the binomial." *Biometrika*, 26(4), 404--413.
 McNemar, Q. (1947). "Note on the sampling error of the difference between
 correlated proportions or percentages." *Psychometrika*, 12(2), 153--157.
+Lancaster, H. O. (1961). "Significance tests in discrete distributions."
+*JASA*, 56(294), 223--234 (the mid-P correction).
+Brown, L. D., Cai, T. T. & DasGupta, A. (2001). "Interval estimation for a
+binomial proportion." *Statistical Science*, 16(2), 101--133.
 """
 
 from __future__ import annotations
