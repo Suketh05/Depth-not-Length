@@ -33,6 +33,14 @@ Paper anchors
 * `sec:stats` -- statistical-methodology section listing Wilson intervals and exact
   paired tests as the reporting standard for the bounded, often-binary outcomes here.
 
+See Also
+--------
+membench.metrics.factorization.wilson_interval : the large-sample score interval this
+    module's :func:`clopper_pearson` conservatively contains; prefer Wilson away from
+    the boundaries and Clopper--Pearson at the ``0/n`` / ``n/n`` cells.
+membench.stats.hypothesis.mcnemar_test : the same exact test driven from paired boolean
+    outcome vectors rather than the pre-tabulated discordant counts ``b`` and ``c``.
+
 References
 ----------
 Clopper, C. J. and Pearson, E. S. (1934). "The use of confidence or fiducial limits
