@@ -44,6 +44,8 @@ __all__ = [
     "MatchupOutcome",
     "SessionRecord",
     "decide_matchup",
+    "session_tokens_from_turns",
+    "sweep_matchup_count",
 ]
 
 BRIEF_SYSTEM = "brief"
@@ -164,3 +166,56 @@ class Matchup:
     def outcome(self) -> MatchupOutcome:
         """Strict session-cheaper outcome of this cell (see :func:`decide_matchup`)."""
         return decide_matchup(self.brief_tokens, self.competitor_tokens)
+
+
+def session_tokens_from_turns(turn_tokens: Sequence[int]) -> int:
+    """Total session spend as the sum of a per-turn token ledger.
+
+    The paper's per-trace ledger (``tab:tok_agent_context_gpt55``) reports
+    tokens per turn and their total in the "Session tok." column; this is that
+    total. E.g. the Brief-context row: ``1598 + 203 + 34 = 1835``, and the
+    unaided worst case ``1403 + 698 + 601 + 1461 = 4163`` (the final bucket is
+    the table's "Turn 4+" aggregate).
+
+    Parameters
+    ----------
+    turn_tokens:
+        Per-turn (or per-turn-bucket) token spends; each strictly positive and
+        the ledger non-empty (every session has a turn 1).
+
+    Returns
+    -------
+    int
+        Sum of the ledger.
+    """
+    if len(turn_tokens) == 0:
+        raise ValueError("a session ledger must contain at least one turn")
+    for i, tokens in enumerate(turn_tokens):
+        if tokens <= 0:
+            raise ValueError(f"turn {i + 1} tokens must be positive, got {tokens!r}")
+    return sum(turn_tokens)
+
+
+def sweep_matchup_count(n_llms: int, n_tasks: int, n_competitors: int) -> int:
+    """Number of matchups in a full crossed sweep.
+
+    One matchup per (LLM x task x competing context layer) cell, so the total
+    is the plain product. Paper instance (``tab:tok_context_winrate``):
+    ``12 LLMs x 30 SWE agent tasks x 10 context layers = 3600``.
+
+    Parameters
+    ----------
+    n_llms, n_tasks, n_competitors:
+        Positive sweep dimensions.
+
+    Returns
+    -------
+    int
+        ``n_llms * n_tasks * n_competitors``.
+    """
+    if n_llms <= 0 or n_tasks <= 0 or n_competitors <= 0:
+        raise ValueError(
+            "sweep dimensions must be positive, got "
+            f"n_llms={n_llms!r}, n_tasks={n_tasks!r}, n_competitors={n_competitors!r}"
+        )
+    return n_llms * n_tasks * n_competitors
