@@ -255,3 +255,46 @@ class TestMcNemarMidP:
     def test_mid_p_never_exceeds_exact_p(self, b: int, c: int) -> None:
         res = mcnemar_exact(b, c)
         assert 0.0 < res.mid_p <= res.p_value <= 1.0
+
+
+class TestMcNemarDegenerateAndValidation:
+    """Edge cells: no discordance, perfect balance, one-sided saturation."""
+
+    def test_zero_discordant_pairs_is_uninformative(self) -> None:
+        # All pairs concordant: no evidence either way, p = 1 by convention.
+        res = mcnemar_exact(0, 0)
+        assert res.statistic == 0.0
+        assert res.p_value == 1.0
+        assert res.mid_p == 1.0
+
+    @pytest.mark.parametrize(("b", "c"), [(1, 1), (5, 5)])
+    def test_perfectly_balanced_discordance(self, b: int, c: int) -> None:
+        # b == c: the doubled tail exceeds 1 and is clipped; the mid-p form
+        # 2*P(X<=k) - P(X=k) equals P(X<=k) + P(X>=k) - P(X=k) = 1 exactly for
+        # k = n/2 by symmetry -- both p-values are exactly 1 (dyadic arithmetic).
+        res = mcnemar_exact(b, c)
+        assert res.statistic == 0.0
+        assert res.p_value == 1.0
+        assert res.mid_p == 1.0
+
+    def test_fully_one_sided_discordance(self) -> None:
+        # b=0, c=13 (chance floor of the tail): p = 2 * C(13,0)/2^13 = 2/8192
+        # = 1/4096 = 0.000244140625 exactly.
+        res = mcnemar_exact(0, 13)
+        assert res.p_value == 1 / 4096
+        assert res.p_value == 0.000244140625
+        assert res.statistic == -13.0
+        # Mid-p halves the only tail term: 2 * 0.5 * (1/8192) = 1/8192.
+        assert res.mid_p == 1 / 8192
+
+    def test_single_discordant_pair(self) -> None:
+        # n=1, k=0: p = 2 * (1/2) = 1.0; mid-p = 2 * 0.5 * (1/2) = 0.5.
+        res = mcnemar_exact(1, 0)
+        assert res.p_value == 1.0
+        assert res.mid_p == 0.5
+
+    def test_negative_counts_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            mcnemar_exact(-1, 3)
+        with pytest.raises(ValueError, match="non-negative"):
+            mcnemar_exact(3, -1)
