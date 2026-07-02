@@ -38,6 +38,23 @@ prose; 0.96 -> 0.76 -> 0.47 in the table cells -- the two differ, see
 :mod:`membench.datasets.capture_conditions`) belongs to the measured run;
 this module produces well-formed, paired rows and their tab:capexp-shaped
 aggregation from whatever corpus and parameters it is given.
+
+Examples
+--------
+Reproduce the tab:capexp protocol at full size (offline, deterministic)::
+
+    from membench.analysis.capture_experiment import (
+        render_capture_table,
+        run_capture_experiment,
+    )
+
+    rows = run_capture_experiment()          # 3 conditions x 4 retrievers x 120 tasks
+    print(render_capture_table(rows))        # retriever x condition x d1/d2/d3
+
+The qualitative shape to expect (paper conclusions (i)/(ii), Subsection
+``sec:capconc``): the graph arm is depth-flat under ``captured``, drops under
+``discrete_no_links`` while the lexical arms' rows are unchanged, and every
+arm falls into a common low band under ``raw_scattered``.
 """
 
 from __future__ import annotations
