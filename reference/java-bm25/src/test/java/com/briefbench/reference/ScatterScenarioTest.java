@@ -100,6 +100,26 @@ class ScatterScenarioTest {
         assertEquals(DecisionGraph.probesForScatter(3), DecisionGraph.probesLowerBound(3, 1.0));
     }
 
+    @Test
+    void flatSimilarityOverDepthChainPaysSigmaEqualsD() {
+        // Thm thm:scatter: flat similarity split over a depth-d chain pays sigma=d, so
+        // its assembly probability is p^d; a typed dereference of the same chain pays
+        // sigma=1 (probability p). We sweep d=1..4 at the calibration rho=0.67 stand-in
+        // p=0.67 and check the flat penalty equals p^d while typed stays p.
+        double p = 0.67;
+        for (int d = 1; d <= 4; d++) {
+            assertEquals(d, DecisionGraph.scatterForFlatChain(d));
+            double flat = DecisionGraph.scatterFactor(p, DecisionGraph.scatterForFlatChain(d));
+            assertEquals(Math.pow(p, d), flat, EPS);
+            double typed = DecisionGraph.scatterFactor(p, DecisionGraph.probesForDereference());
+            assertEquals(p, typed, EPS);
+            if (d >= 2) {
+                // Deeper chains strictly widen the typed-vs-flat gap.
+                assertTrue(typed > flat);
+            }
+        }
+    }
+
     // ---- Edge cases: zero scatter, saturation, domain guards ----
 
     @Test
