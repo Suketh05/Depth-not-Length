@@ -158,3 +158,65 @@ function checkKappaRoundTrip(): CheckResult[] {
   }
   return results;
 }
+
+const IDENTITY_TOL = 1e-9; // integer/decimal identities carry only float dust
+
+// ---------------------------------------------------------------------------
+// Identity B.2 — session-token win rate (tab:tok_context_winrate).
+// 2880 / 3600 = 0.800; won + lost + tied = total with 0 ties.
+// ---------------------------------------------------------------------------
+
+function checkTokenWinRate(): CheckResult[] {
+  const rows = loadTokenEconomics();
+  const won = tokenMetric(rows, "matchups_won");
+  const lost = tokenMetric(rows, "matchups_lost");
+  const tied = tokenMetric(rows, "matchups_tied");
+  const total = tokenMetric(rows, "matchups_total");
+  const pct = tokenMetric(rows, "session_token_win_rate_pct");
+  const rate = won / total;
+  const rateOk =
+    approxEqual(rate, 0.8, IDENTITY_TOL) &&
+    approxEqual(rate, pct / 100, IDENTITY_TOL) &&
+    Math.round(rate * 1000) / 1000 === 0.8;
+  const conservationOk = approxEqual(won + lost + tied, total, IDENTITY_TOL) && tied === 0;
+  return [
+    {
+      identity: `win rate = matchups_won/matchups_total = ${won}/${total}`,
+      sourceFile: "paper_token_economics.csv",
+      paperLabel: "tab:tok_context_winrate",
+      expected: `0.800 (= ${pct}%)`,
+      actual: fmt(rate, 6),
+      ok: rateOk,
+    },
+    {
+      identity: `won + lost + tied = ${won} + ${lost} + ${tied}`,
+      sourceFile: "paper_token_economics.csv",
+      paperLabel: "tab:tok_context_winrate",
+      expected: `${total} (ties = 0)`,
+      actual: `${won + lost + tied} (ties = ${tied})`,
+      ok: conservationOk,
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Identity B.3 — unbiased scorecard tally (tab:scorecard): 22 + 14 + 5 = 41.
+// ---------------------------------------------------------------------------
+
+function checkScorecard(): CheckResult[] {
+  const rows = loadScorecard();
+  const win = scorecardCount(rows, "win");
+  const marginal = scorecardCount(rows, "marginal");
+  const loss = scorecardCount(rows, "loss");
+  const total = win + marginal + loss;
+  return [
+    {
+      identity: `win + marginal + loss = ${win} + ${marginal} + ${loss}`,
+      sourceFile: "paper_scorecard.csv",
+      paperLabel: "tab:scorecard",
+      expected: "41",
+      actual: String(total),
+      ok: total === 41 && win === 22 && marginal === 14 && loss === 5,
+    },
+  ];
+}
