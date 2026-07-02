@@ -41,6 +41,10 @@ public final class Crossover {
         // static-only utility
     }
 
+    // Guard against float undershoot when flooring the q^d == tau depth: a true upper
+    // bound rounded a hair low would wrongly exclude the deepest winning depth.
+    private static final double FLOOR_EPS = 1e-9;
+
     /**
      * Net recovery gain {@code g(d) = P_struct(d) - P_sim(d) = q^d - s0^d rho^{d(d+1)/2}}
      * (eq:gd), defined for continuous {@code d} so the crossover can be located
@@ -219,5 +223,84 @@ public final class Crossover {
             }
         }
         return 0.5 * (lo + hi);
+    }
+
+    /**
+     * Closed-form bracket of the crossover depth {@code d*} (mirror of
+     * {@code bounds.py::CrossoverBounds}). The bounds are guaranteed to bracket
+     * {@link #findCrossoverDepth}'s {@code dStar} whenever a crossover exists, and the
+     * win window always contains the solver's win region.
+     *
+     * @param tau overhead ratio the bracket was derived for
+     * @param dLower closed-form lower bound (every shallower integer depth provably
+     *     loses); exact at {@code tau = 0}
+     * @param dUpper closed-form upper bound (every deeper integer depth provably
+     *     loses because {@code q^d} itself drops below {@code tau}); clipped to
+     *     {@code maxDepth}
+     * @param hasWinWindow whether a win is possible at all
+     * @param winLo inclusive lower end of the win window ({@code -1} if none)
+     * @param winHi inclusive upper end of the win window ({@code -1} if none)
+     */
+    public record CrossoverBounds(
+            double tau, int dLower, int dUpper, boolean hasWinWindow, int winLo, int winHi) {}
+
+    /** Bracket the crossover depth using the default scan range ({@code maxDepth = 64}). */
+    public static CrossoverBounds bracketCrossoverDepth(Recovery.Model model, double tau) {
+        return bracketCrossoverDepth(model, tau, 64);
+    }
+
+    /**
+     * Bracket the crossover depth {@code d*} in closed form
+     * (bounds.py::bracket_crossover_depth). Derives an {@code O(1)} lower/upper bound
+     * on the smallest depth at which structured recovery clears {@code tau}, plus the
+     * closed-form win window.
+     *
+     * <p>Derivation (module docstring): winners satisfy {@code d > d0} (lower) and
+     * {@code q^d > tau <=> d < ln(tau)/ln(q)} (upper). For {@code tau >= q} the
+     * structured term never clears the overhead; for {@code q = 1} the advantage is
+     * monotone so the window is the half-line {@code [d*, maxDepth]}.
+     *
+     * @param maxDepth largest integer depth considered; unbounded upper bounds (at
+     *     {@code tau = 0} or {@code q = 1}) are clipped to this
+     */
+    public static CrossoverBounds bracketCrossoverDepth(
+            Recovery.Model model, double tau, int maxDepth) {
+        if (tau < 0.0) {
+            throw new IllegalArgumentException("tau must be non-negative, got " + tau);
+        }
+        if (maxDepth < 1) {
+            throw new IllegalArgumentException("max_depth must be >= 1, got " + maxDepth);
+        }
+
+        double d0 = tauZeroCrossover(model); // also validates rho < 1
+        int dLower = Math.max(1, (int) Math.floor(d0) + 1);
+
+        double q = model.q();
+        double lnQ = Math.log(q);
+
+        int dUpper;
+        int winHi;
+        if (tau == 0.0) {
+            // Rising crossover is pinned exactly; the win window runs to the scan edge.
+            dUpper = Math.min(dLower, maxDepth);
+            winHi = maxDepth;
+        } else if (tau >= q) {
+            // q^d <= q <= tau for every d >= 1: structure can never clear the overhead.
+            return new CrossoverBounds(tau, dLower, dLower, false, -1, -1);
+        } else if (lnQ == 0.0) {
+            // q == 1: q^d = 1 > tau for all d, so the win window is unbounded above.
+            dUpper = maxDepth;
+            winHi = maxDepth;
+        } else {
+            // Winners satisfy q^d > tau, i.e. d < ln(tau)/ln(q).
+            double u = Math.log(tau) / lnQ;
+            dUpper = Math.min((int) Math.floor(u + FLOOR_EPS), maxDepth);
+            winHi = dUpper;
+        }
+
+        if (dLower <= winHi) {
+            return new CrossoverBounds(tau, dLower, dUpper, true, dLower, winHi);
+        }
+        return new CrossoverBounds(tau, dLower, dUpper, false, -1, -1);
     }
 }
