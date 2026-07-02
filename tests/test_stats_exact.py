@@ -165,3 +165,36 @@ class TestMcNemarMidP:
         assert res.mid_p_value < res.p_value
         # The gap is exactly the excluded point mass C(n, min(b,c)) / 2^n = 45/1024.
         assert res.p_value - res.mid_p_value == pytest.approx(45 / 1024, abs=1e-15)
+
+
+class TestMcNemarEdges:
+    def test_no_discordant_pairs_returns_unity(self) -> None:
+        # b = c = 0: the test is undefined; the convention returns p = 1.0 (no evidence).
+        res = mcnemar_exact(0, 0)
+        assert res.p_value == 1.0
+        assert res.mid_p_value == 1.0
+        assert res.statistic == 0.0
+        assert res.n_discordant == 0
+
+    def test_even_small_split_clips_to_one(self) -> None:
+        # b = c = 1 (n = 2): 2 * (C(2,0)+C(2,1)) / 4 = 2 * 3 / 4 = 1.5, clipped to 1.0.
+        # Mid-p: (2*3 - C(2,1)) / 4 = (6 - 2) / 4 = 1.0.
+        res = mcnemar_exact(1, 1)
+        assert res.p_value == 1.0
+        assert res.mid_p_value == 1.0
+
+    def test_fully_discordant_is_strongly_significant(self) -> None:
+        # b = 10, c = 0 (all discordances favour one arm), n = 10, min = 0:
+        #   p     = 2 * C(10,0) / 2^10 = 2/1024 = 1/512 = 0.001953125.
+        #   p_mid = (2 * C(10,0) - C(10,0)) / 2^10 = 1/1024 = 0.0009765625.
+        res = mcnemar_exact(10, 0)
+        assert res.p_value == 1 / 512
+        assert res.p_value == 0.001953125
+        assert res.mid_p_value == 1 / 1024
+        assert res.statistic == 10.0
+
+    def test_rejects_negative_counts(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            mcnemar_exact(-1, 3)
+        with pytest.raises(ValueError, match="non-negative"):
+            mcnemar_exact(3, -2)
