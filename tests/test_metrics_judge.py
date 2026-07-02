@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
-from membench.metrics.compliance import score_compliance
+import dataclasses
+
+import pytest
+
+from membench.metrics.compliance import score_compliance, score_compliance_for_task
 from membench.metrics.judge import (
+    PROMPT_ORDERS,
+    ComplianceJudge,
     JudgeCase,
+    JudgeConfig,
+    JudgeVerdict,
+    LLMComplianceJudge,
     StubComplianceJudge,
+    judge_task,
 )
 from membench.types import MemoryItem, Scorer, SpecVariant, Task
 
@@ -134,3 +144,115 @@ class TestStubJudgeGoldens:
         v0 = StubComplianceJudge(seed=0).judge(case).compliant
         v1 = StubComplianceJudge(seed=1).judge(case).compliant
         assert v0 == v1  # ... verdict does not
+
+
+class TestProtocolConformance:
+    """The judging contract of sec:grader, checked structurally."""
+
+    def test_both_backends_implement_the_judge_contract(self) -> None:
+        assert issubclass(StubComplianceJudge, ComplianceJudge)
+        assert issubclass(LLMComplianceJudge, ComplianceJudge)
+        assert isinstance(StubComplianceJudge(), ComplianceJudge)
+
+    def test_abstract_contract_cannot_be_instantiated(self) -> None:
+        with pytest.raises(TypeError):
+            ComplianceJudge()  # type: ignore[abstract]
+
+    def test_judge_case_is_arm_blind_by_construction(self) -> None:
+        # sec:grader: the judge "sees the known invariant as reference but not
+        # the arm identity". The case type has exactly these fields and nothing
+        # that could carry an arm/system/retriever identity.
+        field_names = {f.name for f in dataclasses.fields(JudgeCase)}
+        assert field_names == {"task_query", "invariant_text", "answer_text", "decision_id"}
+        for leak in ("arm", "system", "retriever", "model"):
+            assert leak not in field_names
+
+    def test_judge_case_requires_a_reference(self) -> None:
+        with pytest.raises(ValueError, match="reference"):
+            JudgeCase(task_query="q", invariant_text="", answer_text="a", decision_id=None)
+
+    def test_verdict_records_full_judge_provenance(self) -> None:
+        # sec:grader promises judge model, version, and prompt order are
+        # detailed; every verdict carries them.
+        verdict = StubComplianceJudge(prompt_order="answer_first").judge(_case(AUDIT, "text"))
+        assert verdict.config.model == "stub-rubric-judge"
+        assert verdict.config.version == "rubric-v1"
+        assert verdict.config.prompt_order == "answer_first"
+        assert verdict.config.temperature == 0.0
+
+    def test_verdicts_and_cases_are_immutable(self) -> None:
+        verdict = StubComplianceJudge().judge(_case(AUDIT, "text"))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            verdict.compliant = True  # type: ignore[misc]
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            _case(AUDIT, "text").answer_text = "other"  # type: ignore[misc]
+
+    def test_prompt_orders_constant(self) -> None:
+        assert PROMPT_ORDERS == ("invariant_first", "answer_first")
+
+
+class TestJudgeConfigValidation:
+    def test_rejects_unknown_prompt_order(self) -> None:
+        with pytest.raises(ValueError, match="prompt_order"):
+            JudgeConfig(prompt_order="answer_last")
+
+    def test_rejects_negative_temperature(self) -> None:
+        with pytest.raises(ValueError, match="temperature"):
+            JudgeConfig(temperature=-0.1)
+
+    def test_rejects_nonpositive_max_tokens(self) -> None:
+        with pytest.raises(ValueError, match="max_tokens"):
+            JudgeConfig(max_tokens=0)
+
+    def test_rejects_empty_model(self) -> None:
+        with pytest.raises(ValueError, match="model"):
+            JudgeConfig(model="")
+
+    def test_defaults_are_the_offline_stub_identity(self) -> None:
+        config = JudgeConfig()
+        assert config.model == "stub-rubric-judge"
+        assert config.prompt_order == "invariant_first"
+        assert config.temperature == 0.0
+
+
+class TestJudgeTask:
+    def test_rate_arithmetic_one_of_two(self) -> None:
+        # D-1 enforced, D-2 never mentioned: rate = 1/2 = 0.5 (hand-computed).
+        result = judge_task(
+            StubComplianceJudge(),
+            "I will call withAuditLog() before streaming.",
+            _task(("D-1", "D-2")),
+        )
+        assert result.total == 2
+        assert result.compliant == 1
+        assert result.compliant_ids == ("D-1",)
+        assert result.rate == 0.5
+        assert [decision_id for decision_id, _ in result.verdicts] == ["D-1", "D-2"]
+        assert all(isinstance(v, JudgeVerdict) for _, v in result.verdicts)
+
+    def test_vacuous_task_is_fully_compliant(self) -> None:
+        # Same convention as the rule-based ComplianceResult: no governing
+        # decisions -> rate 1.0 on zero units.
+        result = judge_task(StubComplianceJudge(), "anything", _task(()))
+        assert result.total == 0
+        assert result.compliant == 0
+        assert result.rate == 1.0
+        assert result.verdicts == ()
+
+    def test_governing_id_missing_from_corpus_uses_bare_id_fallback(self) -> None:
+        assert judge_task(StubComplianceJudge(), "per D-404 we act", _task(("D-404",))).rate == 1.0
+        assert judge_task(StubComplianceJudge(), "unrelated", _task(("D-404",))).rate == 0.0
+
+    def test_parity_with_rule_scorer_on_ungamed_responses(self) -> None:
+        # On answers with no negated restatements the two graders share the
+        # identifier surface, so per-task rates coincide exactly.
+        task = _task(("D-1", "D-2", "D-3"))
+        for response in (
+            "I will call withAuditLog() and use DateRangePicker, per D-3.",
+            "Use DateRangePicker for the date range.",
+            "Nothing relevant here.",
+        ):
+            judged = judge_task(StubComplianceJudge(), response, task)
+            ruled = score_compliance_for_task(response, task)
+            assert judged.rate == ruled.rate
+            assert judged.compliant_ids == ruled.honored_ids
