@@ -46,6 +46,47 @@ public final class Recovery {
         // static-only utility; the theory carries no per-instance state
     }
 
+    private static void checkDepth(int d) {
+        if (d < 1) {
+            throw new IllegalArgumentException("depth d must be >= 1, got " + d);
+        }
+    }
+
+    /**
+     * Triangular exponent {@code T = d(d+1)/2}, the sum {@code 1 + 2 + ... + d} of
+     * per-hop decay powers. Computed in {@code double} (matching Python's true
+     * division) so it composes with the continuous-{@code d} forms in
+     * {@link Crossover}.
+     */
+    static double triangular(double d) {
+        return d * (d + 1.0) / 2.0;
+    }
+
+    /**
+     * Probability that similarity memory recovers a full depth-{@code d} chain,
+     * {@code P_sim(d) = s0^d * rho^{d(d+1)/2}} (eq:simceiling / Thm thm:sim).
+     *
+     * <p>Evaluated directly; underflows to {@code 0.0} for deep chains (float64),
+     * which is faithful behaviour — use {@link #logSimilarityRecovery} when a
+     * finite log is needed.
+     */
+    public static double similarityRecovery(int d, Model model) {
+        checkDepth(d);
+        return Math.pow(model.s0(), d) * Math.pow(model.rho(), triangular(d));
+    }
+
+    /**
+     * Natural log of {@link #similarityRecovery}, stable for large {@code d}:
+     * {@code log P_sim(d) = d*ln(s0) + (d(d+1)/2)*ln(rho)} (eq:simceiling).
+     *
+     * <p>This is concave in {@code d} with slope {@code -> -inf}, the analytic
+     * signature of super-geometric decay.
+     */
+    public static double logSimilarityRecovery(int d, Model model) {
+        checkDepth(d);
+        return d * Math.log(model.s0()) + triangular(d) * Math.log(model.rho());
+    }
+
     /**
      * Immutable calibration bundle: the geometric similarity-decay parameters
      * ({@code s0}, {@code rho}) plus the structured per-edge fidelity {@code q}.
