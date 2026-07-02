@@ -6,9 +6,14 @@
  * the scalar path at -O3 on x86 too. Top-k uses an insertion-maintained sorted
  * buffer, which is optimal for the small k (single-digit to low-tens) this
  * benchmark uses.
+ *
+ * The depth-theory and inference kernels (lower in the file) are scalar
+ * closed-forms; each reproduces its Python reference bit-for-bit by using the
+ * same libm primitives (pow/asin/sqrt) in the same association order.
  */
 #include "membench_native.h"
 
+#include <math.h>
 #include <stddef.h>
 
 #ifdef __ARM_NEON
@@ -65,3 +70,23 @@ int mb_cosine_topk(const float *corpus, int n, int dim, const float *query,
   }
   return k;
 }
+
+/* ==========================================================================
+ * Depth-theory and inference kernels (see membench_native.h for contracts and
+ * paper anchors). Each matches the Python reference to < 1e-12.
+ * ======================================================================== */
+
+/*
+ * Triangular exponent T = d(d+1)/2 as a double. Python evaluates `d*(d+1)/2`
+ * with an int d and true division, yielding an exact double for these small d;
+ * we reproduce that promotion so pow() sees the identical exponent.
+ */
+static double mb_triangular(double d) { return d * (d + 1.0) / 2.0; }
+
+/* P_sim(d) = s0^d * rho^(d(d+1)/2). Paper eq:simceiling. */
+double mb_similarity_recovery(double s0, double rho, int d) {
+  return pow(s0, (double)d) * pow(rho, mb_triangular((double)d));
+}
+
+/* P_struct(d) = q^d. Paper Thm thm:struct. */
+double mb_structured_recovery(double q, int d) { return pow(q, (double)d); }
