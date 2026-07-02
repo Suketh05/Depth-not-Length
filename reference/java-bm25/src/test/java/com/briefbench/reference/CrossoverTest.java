@@ -211,4 +211,98 @@ class CrossoverTest {
             }
         }
     }
+
+    // ---- shape properties: unimodal g (q<1), monotone q=1 limit, edge cases ----
+
+    @Test
+    void gainIsUnimodalAtTheCalibration() {
+        // For q < 1, g rises, peaks, then falls back toward 0 (an interval win, not a
+        // half-line). The calibration peaks at d = 3 (g = 0.8816...).
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(CAL, 0.0);
+        assertEquals(3, r.peakDepth());
+        // Strictly rising before the peak, strictly falling after.
+        for (int d = 1; d < 3; d++) {
+            assertTrue(Crossover.g(d + 1, CAL) > Crossover.g(d, CAL), "rising at d=" + d);
+        }
+        for (int d = 3; d < 12; d++) {
+            assertTrue(Crossover.g(d + 1, CAL) < Crossover.g(d, CAL), "falling at d=" + d);
+        }
+    }
+
+    @Test
+    void gCurveMirrorsGAtEveryScannedDepth() {
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(CAL, 0.3, 20);
+        assertEquals(20, r.gCurve().length);
+        for (int i = 0; i < 20; i++) {
+            assertEquals(Crossover.g(i + 1, CAL), r.gCurve()[i], 0.0, "gCurve at d=" + (i + 1));
+        }
+    }
+
+    @Test
+    void perfectFidelityGivesAMonotoneHalfLineWin() {
+        // q = 1: g(d) = 1 - P_sim(d) is strictly increasing, so the win is the
+        // half-line [d*, maxDepth] (Proposition 2 holds only in this limit).
+        Recovery.Model m = new Recovery.Model(0.7, 0.67, 1.0);
+        for (int d = 1; d < 10; d++) {
+            assertTrue(Crossover.g(d + 1, m) > Crossover.g(d, m), "monotone g at d=" + d);
+        }
+        int maxDepth = 32;
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(m, 0.5, maxDepth);
+        assertTrue(r.exists());
+        assertEquals(maxDepth, r.winHi(), "win region runs to the scan edge");
+        Crossover.CrossoverBounds b = Crossover.bracketCrossoverDepth(m, 0.5, maxDepth);
+        assertTrue(b.hasWinWindow());
+        assertEquals(maxDepth, b.winHi(), "closed-form window is the half-line");
+    }
+
+    @Test
+    void noCrossoverWhenOverheadExceedsPeakGain() {
+        // Max gain for the calibration is g(3) = 0.8816...; an overhead above it is
+        // never cleared, so no crossover exists (saturation of the win region).
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(CAL, 0.9);
+        assertFalse(r.exists());
+        assertEquals(-1, r.dStar());
+        assertTrue(Double.isNaN(r.dStarContinuous()));
+        assertEquals(3, r.peakDepth(), "peak is still reported when nobody wins");
+    }
+
+    @Test
+    void noCrossoverWhenOverheadExceedsStructuredTerm() {
+        // tau >= q: q^d <= q <= tau for every depth, so structure can never clear the
+        // overhead and the closed-form window is empty.
+        Crossover.CrossoverBounds b = Crossover.bracketCrossoverDepth(CAL, 0.98);
+        assertFalse(b.hasWinWindow());
+        assertFalse(Crossover.findCrossoverDepth(CAL, 0.98).exists());
+    }
+
+    @Test
+    void continuousRootLandsOnTauOnTheRisingEdge() {
+        // For a calibrated overhead the continuous crossover sits on the rising edge
+        // in (d*-1, d*] and satisfies g(d_continuous) ~ tau (reference tol 1e-6).
+        double tau = 0.6;
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(CAL, tau);
+        assertEquals(2, r.dStar());
+        assertTrue(r.dStarContinuous() > 1.0 && r.dStarContinuous() <= 2.0,
+                "continuous root on rising edge: " + r.dStarContinuous());
+        assertEquals(tau, Crossover.g(r.dStarContinuous(), CAL), 1e-6);
+    }
+
+    @Test
+    void continuousRootPinsToDStarWhenAlreadyWinningAtDepthOne() {
+        // When structure wins at d = 1 there is no sub-integer rising edge, so the
+        // continuous crossover collapses to d* = 1 exactly (matches the reference).
+        Crossover.CrossoverResult r = Crossover.findCrossoverDepth(CAL, 0.0);
+        assertEquals(1, r.dStar());
+        assertEquals(1.0, r.dStarContinuous(), 0.0);
+    }
+
+    @Test
+    void findCrossoverRejectsIllegalArguments() {
+        assertThrows(IllegalArgumentException.class,
+                () -> Crossover.findCrossoverDepth(CAL, -0.1));
+        assertThrows(IllegalArgumentException.class,
+                () -> Crossover.findCrossoverDepth(CAL, 0.1, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> Crossover.bracketCrossoverDepth(CAL, -0.1));
+    }
 }
