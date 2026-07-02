@@ -88,6 +88,29 @@ public final class Recovery {
     }
 
     /**
+     * Probability that structured (typed-link) memory recovers a full depth-{@code d}
+     * chain, {@code P_struct(d) = q^d} (Thm thm:struct).
+     *
+     * <p>Only {@code Theta(d)} work and no size penalty: the fall-off is a plain
+     * geometric {@code q^d}, gentle compared with the similarity ceiling.
+     *
+     * @param d chain depth ({@code >= 1})
+     * @param q per-edge fidelity in {@code (0, 1]}
+     */
+    public static double structuredRecovery(int d, double q) {
+        checkDepth(d);
+        if (!(q > 0.0 && q <= 1.0)) {
+            throw new IllegalArgumentException("q must be in (0, 1], got " + q);
+        }
+        return Math.pow(q, d);
+    }
+
+    /** Convenience: {@link #structuredRecovery(int, double)} using the model's {@code q}. */
+    public static double structuredRecovery(int d, Model model) {
+        return structuredRecovery(d, model.q());
+    }
+
+    /**
      * Immutable calibration bundle: the geometric similarity-decay parameters
      * ({@code s0}, {@code rho}) plus the structured per-edge fidelity {@code q}.
      *
