@@ -311,3 +311,27 @@ SELECT CASE WHEN ABS(
     SELECT cum_p FROM hop WHERE k = 3
   ) - 29.415231221293272) <= 1e-9 THEN 1 ELSE 0 END;
 
+-- ---------------------------------------------------------------------------
+-- ASSERT 6 -- Supersession resolves to the CURRENT decision (walk to the head).
+--   Anchors: tab:super (current-ranked-first), sec:resmech-super.
+-- ---------------------------------------------------------------------------
+-- Start from the stale original s-sess-1 and follow `supersedes` edges in
+-- reverse (who supersedes me?) to the head -- the version that is never itself
+-- superseded (never a target of a supersedes edge). Must return s-sess-3.
+CREATE TABLE _assert_super_head_is_current (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO _assert_super_head_is_current
+SELECT CASE WHEN (
+  WITH RECURSIVE super_walk(node) AS (
+      SELECT 's-sess-1'
+    UNION
+      SELECT e.source_entity_object_id
+      FROM super_walk w
+      JOIN entity_link e ON e.target_entity_object_id = w.node
+      WHERE e.relationship_type = 'supersedes'
+  )
+  SELECT node FROM super_walk
+  WHERE node NOT IN (
+    SELECT target_entity_object_id FROM entity_link WHERE relationship_type = 'supersedes'
+  )
+) = 's-sess-3' THEN 1 ELSE 0 END;
+
