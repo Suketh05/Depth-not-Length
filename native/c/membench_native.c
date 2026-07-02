@@ -90,3 +90,14 @@ double mb_similarity_recovery(double s0, double rho, int d) {
 
 /* P_struct(d) = q^d. Paper Thm thm:struct. */
 double mb_structured_recovery(double q, int d) { return pow(q, (double)d); }
+
+/*
+ * g(d) = q^d - s0^d * rho^(d(d+1)/2). Paper eq:gd. Continuous d (matching
+ * crossover.g, which locates a sub-integer crossover on the rising edge). The
+ * two terms are formed then subtracted in the same order as the Python.
+ */
+double mb_gap(double s0, double rho, double q, double d) {
+  const double p_struct = pow(q, d);
+  const double p_sim = pow(s0, d) * pow(rho, mb_triangular(d));
+  return p_struct - p_sim;
+}
