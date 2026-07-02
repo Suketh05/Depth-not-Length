@@ -32,6 +32,7 @@ cannot be silently pooled away.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -40,7 +41,10 @@ from membench.metrics.correctness import score_correctness
 
 __all__ = [
     "ResolutionJudge",
+    "ResolutionRate",
     "TaskResolution",
+    "resolution_by_slice",
+    "resolution_rate",
     "score_resolution",
 ]
 
@@ -113,3 +117,84 @@ def score_resolution(
         resolved=correctness.merge_ready,
         reason=correctness.reason,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionRate:
+    """Resolved count, total, and their ratio -- the ``tab:stdbench`` statistic.
+
+    ``rate = resolved / total`` in ``[0, 1]``; ``tab:stdbench`` reports it in
+    percent. The integer counts ride along so small-n slices (the paper's
+    ``swe3`` slice has n = 12) are always visibly small.
+    """
+
+    resolved: int
+    total: int
+    rate: float
+
+
+def resolution_rate(resolutions: Sequence[TaskResolution]) -> ResolutionRate:
+    """Aggregate per-task outcomes into the benchmark resolution rate.
+
+    Parameters
+    ----------
+    resolutions
+        Per-task binary outcomes from :func:`score_resolution`.
+
+    Returns
+    -------
+    ResolutionRate
+        ``resolved / total`` with both counts.
+
+    Raises
+    ------
+    ValueError
+        If ``resolutions`` is empty -- zero tasks has no rate, and a silent
+        0 would fabricate a benchmark number.
+    """
+    if not resolutions:
+        raise ValueError("resolution_rate needs at least one task outcome")
+    resolved = sum(outcome.resolved for outcome in resolutions)
+    return ResolutionRate(
+        resolved=resolved,
+        total=len(resolutions),
+        rate=resolved / len(resolutions),
+    )
+
+
+def resolution_by_slice(
+    resolutions: Sequence[TaskResolution],
+    slice_of: Mapping[str, str],
+) -> dict[str, ResolutionRate]:
+    """Resolution rate per named slice (e.g. the paper's ``swe3`` slice).
+
+    Every task must be assigned a slice: a task id missing from ``slice_of``
+    raises rather than being silently dropped or pooled, so a slice's n is
+    exactly the number of tasks the caller placed in it.
+
+    Parameters
+    ----------
+    resolutions
+        Per-task binary outcomes.
+    slice_of
+        Maps each ``task_id`` to its slice label.
+
+    Returns
+    -------
+    dict of str to ResolutionRate
+        One rate per slice label, keyed by label.
+
+    Raises
+    ------
+    ValueError
+        If a task id has no slice label, or if ``resolutions`` is empty.
+    """
+    if not resolutions:
+        raise ValueError("resolution_by_slice needs at least one task outcome")
+    grouped: dict[str, list[TaskResolution]] = {}
+    for outcome in resolutions:
+        label = slice_of.get(outcome.task_id)
+        if label is None:
+            raise ValueError(f"task {outcome.task_id!r} has no slice label")
+        grouped.setdefault(label, []).append(outcome)
+    return {label: resolution_rate(members) for label, members in grouped.items()}
