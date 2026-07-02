@@ -192,6 +192,11 @@ class FactF1:
     n_predicted: int
     n_gold: int
 
+    @property
+    def f1_percent(self) -> float:
+        r"""F1 as a percentage -- the ``tab:stdbench`` ``DMR / fact F1`` unit (%)."""
+        return 100.0 * self.f1
+
 
 def fact_f1(predicted_facts: Iterable[str], gold_facts: Iterable[str]) -> FactF1:
     r"""Return the DMR deep-memory *fact F1* of a predicted fact set against gold.
@@ -331,6 +336,11 @@ class JudgeAccuracy:
     n_correct: int
     n_total: int
     verdicts: tuple[JudgeVerdict, ...]
+
+    @property
+    def percent(self) -> float:
+        r"""Accuracy as a percentage -- the ``tab:stdbench`` LoCoMo unit (%)."""
+        return 100.0 * self.accuracy
 
 
 def llm_judge_accuracy(records: Sequence[AnswerRecord], judge: AnswerJudge) -> JudgeAccuracy:

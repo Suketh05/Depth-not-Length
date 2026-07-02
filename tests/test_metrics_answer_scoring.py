@@ -121,6 +121,13 @@ class TestFactF1:
         assert result.precision == pytest.approx(1.0)
         assert result.recall == pytest.approx(1.0)
 
+    def test_f1_percent_is_tab_stdbench_unit(self) -> None:
+        # percent == 100 * f1: the DMR "fact F1 (%)" column unit (arithmetic
+        # identity, not a reproduction of the paper's 94.2 headline).
+        result = fact_f1(["Alpha", "beta", "gamma"], ["alpha", "BETA", "delta", "epsilon"])
+        assert result.f1_percent == pytest.approx(100.0 * result.f1)
+        assert result.f1_percent == pytest.approx(100.0 * float(Fraction(4, 7)))
+
     def test_both_empty_is_vacuously_perfect(self) -> None:
         result = fact_f1([], [])
         assert (result.precision, result.recall, result.f1) == (1.0, 1.0, 1.0)
@@ -192,7 +199,9 @@ class TestLlmJudgeAccuracy:
 
     def test_all_correct_saturates_at_one(self) -> None:
         records = [AnswerRecord("q", "a1 b2", "a1 b2"), AnswerRecord("q", "c3", "c3")]
-        assert llm_judge_accuracy(records, TokenOverlapJudge()).accuracy == pytest.approx(1.0)
+        result = llm_judge_accuracy(records, TokenOverlapJudge())
+        assert result.accuracy == pytest.approx(1.0)
+        assert result.percent == pytest.approx(100.0)  # tab:stdbench LoCoMo unit (%)
 
     def test_all_wrong_floors_at_zero(self) -> None:
         records = [AnswerRecord("q", "alpha", "zeta"), AnswerRecord("q", "beta", "omega")]
