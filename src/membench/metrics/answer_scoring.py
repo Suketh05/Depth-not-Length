@@ -50,18 +50,21 @@ from __future__ import annotations
 import re
 import string
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 __all__ = [
     "AnswerJudge",
+    "AnswerRecord",
     "FactF1",
+    "JudgeAccuracy",
     "JudgeVerdict",
     "TokenOverlapJudge",
     "answer_exact_match",
     "answer_tokens",
     "fact_f1",
+    "llm_judge_accuracy",
     "normalize_answer",
     "token_f1",
 ]
@@ -309,3 +312,64 @@ class TokenOverlapJudge:
             score=score,
             rationale=f"token F1 {score:.3f} {'>=' if correct else '<'} threshold {self.threshold}",
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerRecord:
+    """One benchmark item: a question, its gold answer, and a model prediction."""
+
+    question: str
+    gold_answer: str
+    predicted_answer: str
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeAccuracy:
+    """Aggregate LoCoMo LLM-judge accuracy over a set of answered questions."""
+
+    accuracy: float
+    n_correct: int
+    n_total: int
+    verdicts: tuple[JudgeVerdict, ...]
+
+
+def llm_judge_accuracy(records: Sequence[AnswerRecord], judge: AnswerJudge) -> JudgeAccuracy:
+    r"""Return LoCoMo LLM-judge accuracy: the mean correctness verdict over answers.
+
+    Implements the ``LoCoMo / LLM-judge acc.`` row of Table~\ref{tab:stdbench}
+    (Section~\ref{sec:pubbench}; ``Brief 87.6``). Each record is judged independently
+    by the arm-blind ``judge`` (an :class:`AnswerJudge`; the reproducible default is
+    :class:`TokenOverlapJudge`), and accuracy is the fraction of correct verdicts.
+    The judge never receives the arm identity, so the same call scores every arm
+    identically -- the arm-invariance Section~\ref{sec:grader} relies on.
+
+    Parameters
+    ----------
+    records
+        The answered questions to score (at least one).
+    judge
+        An arm-blind answer judge.
+
+    Returns
+    -------
+    JudgeAccuracy
+        Accuracy in ``[0, 1]``, the correct/total counts, and the per-record
+        verdicts (in input order) for inspection.
+
+    Raises
+    ------
+    ValueError
+        If ``records`` is empty (accuracy over no questions is undefined).
+    """
+    if not records:
+        raise ValueError("llm_judge_accuracy needs at least one record")
+    verdicts = tuple(
+        judge(record.question, record.gold_answer, record.predicted_answer) for record in records
+    )
+    n_correct = sum(1 for verdict in verdicts if verdict.correct)
+    return JudgeAccuracy(
+        accuracy=n_correct / len(verdicts),
+        n_correct=n_correct,
+        n_total=len(verdicts),
+        verdicts=verdicts,
+    )
