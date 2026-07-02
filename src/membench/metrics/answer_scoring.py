@@ -395,13 +395,22 @@ def token_overlap_judge(
     gold
         Gold answer text.
     threshold
-        Minimum token F1 to count as correct; boundary inclusive.
+        Minimum token F1 to count as correct; boundary inclusive. Must lie in
+        ``[0, 1]`` -- F1 cannot leave that interval, so a threshold outside it
+        is a constant verdict, i.e. a configuration bug.
 
     Returns
     -------
     bool
         ``True`` iff F1 >= ``threshold``.
+
+    Raises
+    ------
+    ValueError
+        If ``threshold`` is outside ``[0, 1]``.
     """
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold must be in [0, 1], got {threshold}")
     return token_f1(prediction, gold).f1 >= threshold
 
 

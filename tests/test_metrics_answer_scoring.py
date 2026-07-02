@@ -263,6 +263,13 @@ class TestTokenOverlapJudge:
         # Same 1/2-F1 pair fails a stricter threshold.
         assert not token_overlap_judge("q", "blue car", "red car", threshold=0.6)
 
+    def test_threshold_domain_guard(self) -> None:
+        # F1 never leaves [0, 1]; a threshold outside it is a constant verdict.
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            token_overlap_judge("q", "a", "a", threshold=1.5)
+        with pytest.raises(ValueError, match=r"\[0, 1\]"):
+            token_overlap_judge("q", "a", "a", threshold=-0.1)
+
     def test_question_does_not_change_verdict(self) -> None:
         # Deterministic fallback ignores the question by construction.
         assert token_overlap_judge("q1", "lyon", "Lyon") == token_overlap_judge(
