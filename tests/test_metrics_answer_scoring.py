@@ -14,6 +14,7 @@ import pytest
 from membench.metrics.answer_scoring import (
     answer_exact_match,
     answer_tokens,
+    fact_f1,
     normalize_answer,
     token_f1,
 )
@@ -91,3 +92,50 @@ class TestAnswerExactMatch:
 
     def test_mismatch(self) -> None:
         assert answer_exact_match("cat", "dog") is False
+
+
+class TestFactF1:
+    def test_two_of_three_precision_two_of_four_recall_golden(self) -> None:
+        # Golden pack: predicted 3 facts, 2 in gold => precision = 2/3.
+        # gold 4 facts, 2 recovered => recall = 2/4 = 1/2.
+        # F1 = 2*P*R/(P+R) = 2*(2/3)*(1/2)/((2/3)+(1/2)) = (2/3)/(7/6) = 4/7.
+        result = fact_f1(
+            predicted_facts=["Alpha", "beta", "gamma"],
+            gold_facts=["alpha", "BETA", "delta", "epsilon"],
+        )
+        assert result.true_positives == 2
+        assert result.n_predicted == 3
+        assert result.n_gold == 4
+        assert result.precision == pytest.approx(float(Fraction(2, 3)))
+        assert result.recall == pytest.approx(0.5)
+        assert result.f1 == pytest.approx(float(Fraction(4, 7)))
+
+    def test_perfect_recovery_is_one(self) -> None:
+        result = fact_f1(["a1", "b2", "c3"], ["a1", "b2", "c3"])
+        assert result.f1 == pytest.approx(1.0)
+        assert result.precision == pytest.approx(1.0)
+        assert result.recall == pytest.approx(1.0)
+
+    def test_both_empty_is_vacuously_perfect(self) -> None:
+        result = fact_f1([], [])
+        assert (result.precision, result.recall, result.f1) == (1.0, 1.0, 1.0)
+        assert result.true_positives == 0
+
+    def test_one_side_empty_is_zero(self) -> None:
+        # Non-empty prediction, empty gold: precision 0/1, recall vacuous -> F1 0.
+        assert fact_f1(["x1"], []).f1 == 0.0
+        # Empty prediction, non-empty gold: recall 0/1 -> F1 0.
+        assert fact_f1([], ["y2"]).f1 == 0.0
+
+    def test_disjoint_sets_is_zero(self) -> None:
+        result = fact_f1(["p1", "q2"], ["r3", "s4"])
+        assert result.true_positives == 0
+        assert result.f1 == 0.0
+
+    def test_normalization_and_dedup_collapse_facts(self) -> None:
+        # "The Widget!" and "widget" normalize to the same fact; punctuation-only
+        # facts drop out. So predicted collapses to {"widget"}, gold to {"widget"}.
+        result = fact_f1(["The Widget!", "widget", "!!!"], ["Widget", "..."])
+        assert result.n_predicted == 1
+        assert result.n_gold == 1
+        assert result.f1 == pytest.approx(1.0)
