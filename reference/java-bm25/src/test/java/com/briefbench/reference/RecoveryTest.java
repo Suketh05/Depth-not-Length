@@ -62,4 +62,67 @@ class RecoveryTest {
             assertEquals(tri[d - 1], Recovery.triangular(d), 0.0, "T at d=" + d);
         }
     }
+
+    // ---- A.2 structured recovery P_struct(d) = q^d ----
+
+    // Golden pack A.1/A.2, q = 0.97: q^1..q^5.
+    private static final double[] P_STRUCT = {
+        0.97, 0.9409, 0.912673, 0.8852928099999999, 0.8587340256999999
+    };
+
+    @Test
+    void structuredRecoveryMatchesGoldenTableD1toD5() {
+        for (int d = 1; d <= 5; d++) {
+            assertEquals(P_STRUCT[d - 1], Recovery.structuredRecovery(d, 0.97), TOL,
+                    "q^" + d);
+            // The model overload must agree with the raw-q form.
+            assertEquals(Recovery.structuredRecovery(d, 0.97),
+                    Recovery.structuredRecovery(d, CAL), 0.0, "model overload at d=" + d);
+        }
+    }
+
+    @Test
+    void structuredRecoveryEqualsQtoTheD() {
+        // Golden pack A.2: structured_recovery(5, 0.95) == 0.95**5 (exact identity;
+        // the reference's `**` and Java Math.pow share libm pow, so equality is exact).
+        assertEquals(Math.pow(0.95, 5), Recovery.structuredRecovery(5, 0.95), 0.0);
+        // And to full float64 precision it agrees with the repeated per-edge product.
+        assertEquals(0.95 * 0.95 * 0.95 * 0.95 * 0.95,
+                Recovery.structuredRecovery(5, 0.95), TOL);
+    }
+
+    @Test
+    void similarityCeilingEqualsExplicitPerHopProduct() {
+        // Golden pack A.2: closed form checked against the explicit product
+        // prod_{i=1..d} s0 * rho^i for s0=0.9, rho=0.6 (an independent derivation,
+        // not a re-run of the closed form).
+        Recovery.Model m = new Recovery.Model(0.9, 0.6, 0.95);
+        for (int d = 1; d <= 8; d++) {
+            double product = 1.0;
+            for (int i = 1; i <= d; i++) {
+                product *= 0.9 * Math.pow(0.6, i);
+            }
+            assertEquals(product, Recovery.similarityRecovery(d, m), TOL, "d=" + d);
+        }
+    }
+
+    @Test
+    void deepChainUnderflowsWhileLogStaysFinite() {
+        // Golden pack A.2: s0=0.5, rho=0.3 => similarity_recovery(60) underflows to
+        // 0.0 (float64) while log_similarity_recovery(60) is finite.
+        Recovery.Model m = new Recovery.Model(0.5, 0.3, 0.9);
+        assertEquals(0.0, Recovery.similarityRecovery(60, m), 0.0);
+        double logVal = Recovery.logSimilarityRecovery(60, m);
+        assertTrue(Double.isFinite(logVal), "log form must stay finite: " + logVal);
+        assertTrue(logVal < 0.0, "deep-chain log-recovery must be strongly negative");
+    }
+
+    @Test
+    void logSimilarityRecoveryEqualsLogOfDirectFormWhereNoUnderflow() {
+        // For shallow depths the two forms must agree exactly (log of the product).
+        for (int d = 1; d <= 5; d++) {
+            assertEquals(Math.log(Recovery.similarityRecovery(d, CAL)),
+                    Recovery.logSimilarityRecovery(d, CAL), TOL, "d=" + d);
+        }
+    }
 }
