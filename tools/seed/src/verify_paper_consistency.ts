@@ -21,8 +21,11 @@
  *
  * Usage (out-of-tree runtime, per tools/seed conventions):
  *   npx tsc -p tsconfig.json --noEmit false --outDir /tmp/tsbuild && \
+ *     printf '{"type":"module"}' > /tmp/tsbuild/package.json && \
  *     node /tmp/tsbuild/verify_paper_consistency.js
  *   MEMBENCH_DATA_DIR=/path/to/results/data node .../verify_paper_consistency.js
+ * (The one-line package.json marks the build dir ESM, since @membench/seed is an
+ *  ESM package and the emitted JS uses `import`; resolveDataDir finds the CSVs.)
  *
  * Exit code is 0 iff every identity holds; any violation exits non-zero so the
  * check is usable as a CI/pre-publication gate.
