@@ -15,6 +15,7 @@ Goldens come from two independent sources, never from running the module:
 """
 from __future__ import annotations
 
+import csv
 import random
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from membench.analysis.token_economics import (
     run_tournament,
     session_tokens_from_turns,
     sweep_matchup_count,
+    win_count_from_published_pct,
 )
 
 PAPER_CSV = Path(__file__).resolve().parents[1] / "results" / "data" / "paper_token_economics.csv"
@@ -332,3 +334,89 @@ class TestTournamentTallies:
             "kluris": 83.9,
             "none": 77.8,
         }
+
+
+def _load_paper_csv() -> dict[str, float]:
+    with PAPER_CSV.open(newline="") as fh:
+        return {row["metric"]: float(row["value"]) for row in csv.DictReader(fh)}
+
+
+class TestPaperCsvIdentities:
+    """Recompute tab:tok_context_winrate / tab:tok_context_by_competitor from the committed CSV."""
+
+    def test_headline_win_rate_is_2880_over_3600(self) -> None:
+        vals = _load_paper_csv()
+        assert vals["matchups_total"] == 3600
+        assert vals["matchups_won"] == 2880
+        assert vals["matchups_lost"] == 720
+        assert vals["matchups_tied"] == 0  # paper: "There are no ties"
+        # The identity a reader checks: 2880 / 3600 = 0.800 exactly.
+        assert vals["matchups_won"] / vals["matchups_total"] == 0.800
+        assert 100.0 * vals["matchups_won"] / vals["matchups_total"] == pytest.approx(
+            vals["session_token_win_rate_pct"], abs=1e-12
+        )
+        # Wins + losses + ties partition the matchups.
+        assert (
+            vals["matchups_won"] + vals["matchups_lost"] + vals["matchups_tied"]
+            == vals["matchups_total"]
+        )
+        # Sweep shape: 12 LLMs x 30 tasks x 10 context layers.
+        assert sweep_matchup_count(12, 30, 10) == vals["matchups_total"]
+
+    def test_per_competitor_band_is_68_6_to_86_7(self) -> None:
+        vals = _load_paper_csv()
+        per_comp = {
+            k.removeprefix("win_rate_vs_").removesuffix("_pct"): v
+            for k, v in vals.items()
+            if k.startswith("win_rate_vs_")
+        }
+        # Ten layers, 360 matchups each => 10 * 360 = 3600.
+        assert len(per_comp) == 10
+        assert vals["matchups_total"] == 10 * 360
+        # tab:tok_context_by_competitor band: lowest 68.6 (Oiya), highest 86.7
+        # (Oracle Summary); fig:tokwinrate quotes the same 68.6%-86.7% span.
+        assert min(per_comp.values()) == 68.6
+        assert max(per_comp.values()) == 86.7
+        assert min(per_comp, key=per_comp.__getitem__) == "oiya"
+        assert max(per_comp, key=per_comp.__getitem__) == "oracle_summary"
+        # All rates sit above the 50% chance line ("all bars sit well above").
+        assert all(v > 50.0 for v in per_comp.values())
+
+    def test_published_percentages_invert_to_counts_summing_to_2880(self) -> None:
+        # Each one-decimal percentage over 360 matchups pins a unique integer
+        # win count (grid spacing 100/360 ~ 0.278 > 0.1); the ten inverted
+        # counts must reproduce the headline 2880 exactly, and must match the
+        # win-count column of tab:tok_context_by_competitor verbatim.
+        vals = _load_paper_csv()
+        per_comp = {
+            k.removeprefix("win_rate_vs_").removesuffix("_pct"): v
+            for k, v in vals.items()
+            if k.startswith("win_rate_vs_")
+        }
+        counts = {
+            name: win_count_from_published_pct(p, matchups=360) for name, p in per_comp.items()
+        }
+        assert counts == {
+            "mem0": 291,
+            "zep": 279,
+            "contextq": 282,
+            "oracle_summary": 312,
+            "supermemory": 288,
+            "unabyss": 303,
+            "driver": 296,
+            "oiya": 247,
+            "kluris": 302,
+            "none": 280,
+        }
+        assert sum(counts.values()) == 2880 == vals["matchups_won"]
+
+    def test_inversion_helper_guards(self) -> None:
+        # 80.8% over 360 matchups is exactly 291 wins and nothing else.
+        assert win_count_from_published_pct(80.8, matchups=360) == 291
+        # A percentage no integer count rounds to is rejected...
+        with pytest.raises(ValueError, match="no win count"):
+            win_count_from_published_pct(80.9, matchups=360)
+        # ...and a print precision coarser than the grid is ambiguous:
+        # at 0 decimals both 287 and 288 of 360 round to 80%.
+        with pytest.raises(ValueError, match="ambiguous"):
+            win_count_from_published_pct(80.0, matchups=360, decimals=0)
