@@ -14,14 +14,21 @@ from __future__ import annotations
 
 import pytest
 
+from membench.agents.llm.base import LLMClient, LLMResponse
 from membench.metrics.judge import (
+    ANSWER_FIRST,
     DEFAULT_JUDGE_MODEL,
+    INVARIANT_FIRST,
     ComplianceVerdict,
+    DecisionVerdict,
     Judge,
     JudgeConfig,
+    LLMJudge,
     StubJudge,
     agreement_rate,
+    build_judge_prompt,
     judge_vs_rule_agreement,
+    parse_verdict,
 )
 from membench.types import MemoryItem, Scorer, SpecVariant, Task
 
@@ -255,3 +262,102 @@ class TestJudgeVsRuleAgreementEndToEnd:
     def test_tasks_answers_length_mismatch_raises(self) -> None:
         with pytest.raises(ValueError, match="align"):
             judge_vs_rule_agreement(StubJudge(), [_task(("D-001",))], [])
+
+
+class _CannedClient(LLMClient):
+    """An offline LLMClient that returns a fixed reply (no network, not live)."""
+
+    def __init__(self, reply: str, model: str = "judge-test") -> None:
+        self._reply = reply
+        self._model = model
+        self.last_system: str | None = None
+        self.last_user: str | None = None
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
+        self.last_system = system
+        self.last_user = user
+        return LLMResponse(
+            text=self._reply,
+            input_tokens=(len(system) + len(user)) // 4,
+            output_tokens=max(1, len(self._reply) // 4),
+            dollars=0.0,
+            model=self._model,
+        )
+
+
+class TestLLMJudgeOffline:
+    def test_llm_judge_parses_injected_json_verdict(self) -> None:
+        client = _CannedClient('{"honored": true, "confidence": 0.9, "rationale": "enforced"}')
+        judge = LLMJudge(client)
+        assert isinstance(judge, Judge)
+        verdict = judge.grade(_task(("D-001",)), _ANSWER_ENFORCED)
+        (decision,) = verdict.verdicts
+        assert decision.honored is True
+        assert decision.confidence == 0.9
+        assert decision.rationale == "enforced"
+        assert verdict.compliant is True
+
+    def test_llm_judge_config_defaults_to_client_model(self) -> None:
+        judge = LLMJudge(_CannedClient("{}", model="claude-opus-4-8"))
+        assert judge.config.model == "claude-opus-4-8"
+
+    def test_llm_judge_prompt_is_arm_blind_and_carries_the_invariant(self) -> None:
+        client = _CannedClient('{"honored": false, "rationale": "n/a"}')
+        LLMJudge(client, JudgeConfig(prompt_order=INVARIANT_FIRST)).grade(
+            _task(("D-001",)), _ANSWER_RESTATED
+        )
+        assert client.last_system is not None and client.last_user is not None
+        blob = (client.last_system + client.last_user).lower()
+        # The invariant reference and candidate answer are both present ...
+        assert "withauditlog" in blob
+        assert "the decision requires" in blob
+        # ... but no arm identity leaks into the grading prompt (arm-blindness).
+        for arm in ("brief", "bm25", "tfidf", "dense", "raptor", "rerank_ce", "hybrid_rrf"):
+            assert arm not in blob
+
+
+class TestBuildJudgePromptOrder:
+    def test_invariant_first_places_reference_before_answer(self) -> None:
+        system, user = build_judge_prompt(
+            _DECISION_TEXT, "D-001", _ANSWER_ENFORCED, prompt_order=INVARIANT_FIRST
+        )
+        assert isinstance(system, str) and system  # non-empty rubric instructions
+        assert user.index("invariant reference") < user.index("Candidate answer")
+
+    def test_answer_first_swaps_the_two_blocks(self) -> None:
+        _, user = build_judge_prompt(
+            _DECISION_TEXT, "D-001", _ANSWER_ENFORCED, prompt_order=ANSWER_FIRST
+        )
+        # The presentation-order lever of sec:gradervalidity: same content, swapped.
+        assert user.index("Candidate answer") < user.index("invariant reference")
+
+
+class TestParseVerdict:
+    def test_strict_json(self) -> None:
+        verdict = parse_verdict('{"honored": true, "confidence": 0.9, "rationale": "ok"}', "D-1")
+        assert verdict == DecisionVerdict("D-1", True, "ok", 0.9)
+
+    def test_json_embedded_in_prose(self) -> None:
+        verdict = parse_verdict('Sure: {"honored": false, "rationale": "restated"} done.', "D-1")
+        assert verdict.honored is False
+        assert verdict.rationale == "restated"
+        assert verdict.confidence == 1.0  # default when the field is omitted
+
+    def test_confidence_is_clamped_to_unit_interval(self) -> None:
+        assert parse_verdict('{"honored": true, "confidence": 1.5}', "D-1").confidence == 1.0
+        assert parse_verdict('{"honored": true, "confidence": -0.2}', "D-1").confidence == 0.0
+
+    def test_keyword_fallback_when_no_json(self) -> None:
+        assert parse_verdict("The invariant is not honored here.", "D-1").honored is False
+        assert parse_verdict("This clearly honors the constraint.", "D-1").honored is True
+
+    def test_unparseable_reply_fails_closed(self) -> None:
+        # A judge whose reply cannot be read must NOT be credited as compliant.
+        verdict = parse_verdict("<<< garbage with no verdict >>>", "D-1")
+        assert verdict.honored is False
+        assert verdict.confidence == 0.0
+        assert "unparseable" in verdict.rationale
