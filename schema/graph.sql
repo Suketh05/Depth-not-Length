@@ -107,3 +107,27 @@ INSERT INTO entity_link (id, source_entity_object_id, target_entity_object_id, r
   ('e-gov-2', 'd-gov-1', 'd-gov-2', 'constrains', 'confirmed', 1.0, 'explicit'),
   ('e-gov-3', 'd-gov-2', 'd-gov-3', 'constrains', 'confirmed', 1.0, 'explicit');
 
+-- ---------------------------------------------------------------------------
+-- SEED 3/4 -- Scattered distractors across areas + a low-confidence similarity
+-- shortcut trap.
+-- ---------------------------------------------------------------------------
+-- Realistic noise: decisions/features in other areas ('ui', 'perf') reachable
+-- off the governing chain, plus an ISOLATED area ('iso') that must never be
+-- reached from the task. 'e-trap' is a spurious low-confidence (0.20) similarity
+-- edge q-task -> d-gov-3: it would fake a 1-hop shortcut to the governing
+-- decision, but the min_confidence >= 0.5 gate filters it, so the recovered
+-- causal depth stays the true 3 (the confidence gate is why an unreliable
+-- similarity hit does not collapse the measured hop distance).
+INSERT INTO entity_objects (id, entity_type, entity_id, kind, canonical_type, title, access_count, citation_count) VALUES
+  ('dx-ui-1',   'decision', 'D-2001', 'source',    'decision', 'Distractor: button uses design-system primitive', 4, 1),
+  ('dx-ui-2',   'feature',  'F-2002', 'synthesis', 'feature',  'Distractor: checkout page layout', 2, 0),
+  ('dx-perf-1', 'decision', 'D-2003', 'source',    'decision', 'Distractor: memoize cart totals', 3, 1),
+  ('dx-iso-1',  'decision', 'D-3001', 'source',    'decision', 'Isolated-area decision: email footer copy', 1, 0),
+  ('dx-iso-2',  'feature',  'F-3002', 'synthesis', 'feature',  'Isolated-area feature: newsletter opt-in', 1, 0);
+INSERT INTO entity_link (id, source_entity_object_id, target_entity_object_id, relationship_type, status, confidence, match_method) VALUES
+  ('e-dx-1',  'q-task',   'dx-ui-1',   'references', 'confirmed', 0.90, 'explicit'),
+  ('e-dx-2',  'dx-ui-1',  'dx-ui-2',   'related_to', 'inferred',  0.80, 'embedding'),
+  ('e-dx-3',  'd-gov-1',  'dx-perf-1', 'informs',    'inferred',  0.70, 'keyword'),
+  ('e-iso-1', 'dx-iso-1', 'dx-iso-2',  'related_to', 'inferred',  0.75, 'embedding'),
+  ('e-trap',  'q-task',   'd-gov-3',   'related_to', 'inferred',  0.20, 'embedding');
+
