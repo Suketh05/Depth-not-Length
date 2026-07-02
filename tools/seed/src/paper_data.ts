@@ -172,3 +172,42 @@ export function resolveDataDir(startDir: string = process.cwd()): string {
   }
   throw new Error("could not locate results/data (set MEMBENCH_DATA_DIR to override)");
 }
+
+// ---------------------------------------------------------------------------
+// Typed loaders — one per committed paper CSV, each carrying its paper anchor.
+// ---------------------------------------------------------------------------
+
+/**
+ * One arm of tab:realret — real-code retrieval and use, pooled dcbench+swebench
+ * (Claude), sorted by recall. `kappa` is the published use factor; it is `null`
+ * for the `none` arm, whose kappa the paper deliberately leaves blank (no
+ * retrieval mechanism to factorize — golden-pack B.1).
+ */
+export interface RealcodePooledRow {
+  readonly arm: string;
+  readonly recall: number;
+  readonly compliance: number;
+  readonly precision: number;
+  readonly kappa: number | null;
+}
+
+/** Load results/data/paper_realcode_pooled.csv (tab:realret). */
+export function loadRealcodePooled(dataDir: string = resolveDataDir()): RealcodePooledRow[] {
+  const path = join(dataDir, "paper_realcode_pooled.csv");
+  const table = readCsvTable(path);
+  const armIdx = columnIndex(table.header, "arm");
+  const recallIdx = columnIndex(table.header, "recall");
+  const complianceIdx = columnIndex(table.header, "compliance");
+  const precisionIdx = columnIndex(table.header, "precision");
+  const kappaIdx = columnIndex(table.header, "kappa");
+  return table.rows.map((row) => {
+    const arm = stringCell(row, armIdx, `${path} arm`);
+    return {
+      arm,
+      recall: parseNumberCell(row[recallIdx], `${path} ${arm}.recall`),
+      compliance: parseNumberCell(row[complianceIdx], `${path} ${arm}.compliance`),
+      precision: parseNumberCell(row[precisionIdx], `${path} ${arm}.precision`),
+      kappa: parseOptionalNumberCell(row[kappaIdx], `${path} ${arm}.kappa`),
+    };
+  });
+}
