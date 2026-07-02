@@ -38,15 +38,49 @@ many tokens they burn"); the rate lives in :mod:`membench.agents.llm.pricing`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from membench.agents.llm.base import LLMResponse
+from membench.agents.llm.base import LLMClient, LLMResponse
 from membench.agents.llm.pricing import session_blended_cost
+from membench.agents.runner import RunConfig, run_task
+from membench.retrieval.base import MemorySystem
+from membench.types import Task
 
 __all__ = [
+    "ResolutionPredicate",
     "Session",
     "TurnLedger",
+    "confirm_follow_up",
+    "efficiency_score",
+    "run_session",
+    "tokens_per_resolved_point",
 ]
+
+# A resolution predicate reports whether the task has resolved given the current
+# turn index and that turn's response text. Turn-aware so a session can be driven
+# to a deterministic convergence turn in tests (and so a real judge could resolve
+# on the transcript so far).
+ResolutionPredicate = Callable[[int, str, Task], bool]
+
+# The user prompt for turns >= 2. The paper injects context once on turn 1; later
+# turns are short confirm/continue nudges, which is why they collapse to a couple
+# hundred then a handful of tokens once the governing decision is already present.
+FollowUpBuilder = Callable[[int, Task], str]
+
+_SESSION_SYSTEM_PROMPT = (
+    "You are a coding agent in a multi-turn session. Honour the team decisions in the "
+    "context delivered on turn 1; on later turns, confirm and continue the implementation."
+)
+
+
+def confirm_follow_up(turn: int, task: Task) -> str:
+    """Return the default turn->=2 prompt: a short, deterministic continue nudge.
+
+    Deliberately does not re-inject the corpus (the paper delivers context once on
+    turn 1), so later turns are cheap when the decision is already in hand.
+    """
+    return "Continue the implementation, honouring the decisions already provided."
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,3 +278,117 @@ class Session:
         """Return the blended-rate dollar cost accrued after each turn (monotone)."""
         priced = model or self.model
         return tuple(session_blended_cost(priced, tokens) for tokens in self.cumulative_tokens())
+
+
+def run_session(
+    task: Task,
+    memory: MemorySystem,
+    llm: LLMClient,
+    config: RunConfig,
+    *,
+    arm_name: str,
+    resolves_at: ResolutionPredicate,
+    max_turns: int = 8,
+    follow_up: FollowUpBuilder = confirm_follow_up,
+) -> Session:
+    """Drive a multi-turn session over the offline runner and return its ledger.
+
+    Turn 1 goes through :func:`membench.agents.runner.run_task` (single-shot), so
+    the corpus is written and retrieved exactly as in the single-turn harness and
+    the context is injected once, matching the paper's design. Follow-up turns call
+    the same :class:`LLMClient` with :func:`follow_up` prompts, accumulating a
+    :class:`TurnLedger` per turn, until ``resolves_at`` fires or ``max_turns`` is
+    reached (the paper's "runs long / unresolved" case). The driver is fully
+    deterministic given a deterministic backend: identical inputs yield an equal
+    :class:`Session`.
+
+    Parameters
+    ----------
+    task, memory, llm, config
+        The same four inputs the single-turn runner takes; ``config`` supplies the
+        shared retrieval budget and ``max_output_tokens``. Its retry policy is not
+        used here -- each turn is a single model call.
+    arm_name
+        The turn-1 context layer, recorded as :attr:`Session.arm_label`.
+    resolves_at
+        Predicate ``(turn, response_text, task) -> bool``; the first turn for which
+        it is true is the convergence turn and the session stops.
+    max_turns
+        Hard cap on turns (>= 1). If never resolved by then the session is returned
+        unresolved (``convergence_turn is None``).
+    follow_up
+        Builds the user prompt for turns >= 2 (defaults to :func:`confirm_follow_up`).
+
+    Raises
+    ------
+    ValueError
+        If ``max_turns`` < 1.
+    """
+    if max_turns < 1:
+        raise ValueError(f"max_turns must be >= 1, got {max_turns}")
+
+    turn_config = RunConfig(
+        budget_tokens=config.budget_tokens,
+        retry_policy="single_shot",
+        max_output_tokens=config.max_output_tokens,
+    )
+    first = run_task(task, memory, llm, turn_config, arm_name=arm_name)[0]
+    turns: list[TurnLedger] = [
+        TurnLedger(
+            turn=1,
+            prompt_tokens=first.input_tokens,
+            completion_tokens=first.output_tokens,
+            resolved=resolves_at(1, first.response_text, task),
+            dollars=first.dollars,
+        )
+    ]
+
+    while not turns[-1].resolved and len(turns) < max_turns:
+        turn = len(turns) + 1
+        response = llm.complete(
+            _SESSION_SYSTEM_PROMPT, follow_up(turn, task), config.max_output_tokens
+        )
+        turns.append(
+            TurnLedger.from_response(
+                turn, response, resolved=resolves_at(turn, response.text, task)
+            )
+        )
+
+    return Session(model=first.model, arm_label=arm_name, turns=tuple(turns))
+
+
+def tokens_per_resolved_point(session_tokens: float, resolution_pct: float) -> float:
+    """Return session tokens per resolved point (``tab:tok_agent_economics`` column).
+
+    Defined as ``session_tokens / resolution_pct`` with ``resolution_pct`` a
+    percentage in ``(0, 100]`` (e.g. Brief: ``12400 / 48.0 = 258.3``). Lower is
+    better: fewer tokens spent per unit of resolved work.
+
+    Raises
+    ------
+    ValueError
+        If ``resolution_pct`` is not in ``(0, 100]``.
+    """
+    if not 0 < resolution_pct <= 100:
+        raise ValueError(f"resolution_pct must be in (0, 100], got {resolution_pct}")
+    return session_tokens / resolution_pct
+
+
+def efficiency_score(resolution_pct: float, session_tokens: float) -> float:
+    """Return the composite efficiency score (``tab:tok_agent_economics`` column).
+
+    Defined as ``1e5 * resolution_pct / session_tokens`` -- resolved points per
+    hundred-thousand tokens (e.g. Brief: ``1e5 * 48.0 / 12400 = 387.1``). Higher is
+    better; it is the reciprocal of :func:`tokens_per_resolved_point` up to the
+    ``1e5`` scale.
+
+    Raises
+    ------
+    ValueError
+        If ``session_tokens <= 0`` or ``resolution_pct`` is negative.
+    """
+    if session_tokens <= 0:
+        raise ValueError("session_tokens must be positive")
+    if resolution_pct < 0:
+        raise ValueError("resolution_pct must be non-negative")
+    return 1e5 * resolution_pct / session_tokens
