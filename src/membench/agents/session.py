@@ -52,9 +52,7 @@ __all__ = [
     "win_rate",
 ]
 
-DEFAULT_FOLLOW_UP_PROMPT = (
-    "Verify the plan against the governing decisions and finish the task."
-)
+DEFAULT_FOLLOW_UP_PROMPT = "Verify the plan against the governing decisions and finish the task."
 """Fixed follow-up prompt for turns >= 2 (identical across arms: fairness lock).
 
 Context is injected once on turn 1 (``sec:tokecon``); later turns continue the
@@ -165,9 +163,7 @@ class Session:
         if self.max_turns < 0:
             raise ValueError(f"max_turns must be non-negative, got {self.max_turns}")
         if len(self.turns) > self.max_turns:
-            raise ValueError(
-                f"session has {len(self.turns)} turns but max_turns={self.max_turns}"
-            )
+            raise ValueError(f"session has {len(self.turns)} turns but max_turns={self.max_turns}")
         for position, record in enumerate(self.turns, start=1):
             if record.turn != position:
                 raise ValueError(
@@ -299,9 +295,7 @@ def collapse_turns(per_turn_tokens: Sequence[int]) -> PaperLedgerRow:
     """
     if any(tokens < 0 for tokens in per_turn_tokens):
         raise ValueError("per-turn token counts must be non-negative")
-    head = [
-        per_turn_tokens[i] if i < len(per_turn_tokens) else None for i in range(3)
-    ]
+    head = [per_turn_tokens[i] if i < len(per_turn_tokens) else None for i in range(3)]
     tail = sum(per_turn_tokens[3:]) if len(per_turn_tokens) > 3 else None
     return PaperLedgerRow(
         turn1=head[0],

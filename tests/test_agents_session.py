@@ -248,9 +248,7 @@ class TestWinRateGoldens:
         assert sum(row[2] for row in WINRATE_ROWS) == 2880
         assert sum(row[3] for row in WINRATE_ROWS) == 720
 
-    @pytest.mark.parametrize(
-        ("layer", "matchups", "wins", "losses", "pct"), WINRATE_ROWS
-    )
+    @pytest.mark.parametrize(("layer", "matchups", "wins", "losses", "pct"), WINRATE_ROWS)
     def test_per_competitor_percentages(
         self, layer: str, matchups: int, wins: int, losses: int, pct: float
     ) -> None:
@@ -355,9 +353,7 @@ class TestHonestLossGoldens:
 class TestParetoGoldens:
     """tab:tok_pareto's compliance-per-1k-token column, recomputed per row."""
 
-    @pytest.mark.parametrize(
-        ("system", "compliance", "tokens", "per_1k", "dp"), PARETO_ROWS
-    )
+    @pytest.mark.parametrize(("system", "compliance", "tokens", "per_1k", "dp"), PARETO_ROWS)
     def test_compliance_per_1k_tokens(
         self, system: str, compliance: float, tokens: int, per_1k: float, dp: int
     ) -> None:
@@ -395,8 +391,12 @@ def _session(turn_specs: list[tuple[int, int, float, bool]], max_turns: int = 8)
         for i, (prompt, completion, dollars, resolved) in enumerate(turn_specs, start=1)
     )
     return Session(
-        task_id="t1", dataset="synthetic", arm="brief_graph", model="stub",
-        turns=turns, max_turns=max_turns,
+        task_id="t1",
+        dataset="synthetic",
+        arm="brief_graph",
+        model="stub",
+        turns=turns,
+        max_turns=max_turns,
     )
 
 
@@ -407,7 +407,9 @@ class TestSessionLedgerArithmetic:
         # cumulative tokens 1200, 1550, 1600; cumulative dollars 0.25, 0.375,
         # 0.4375. (Shape mirrors the Brief-context collapse row: turn 1 heavy,
         # then confirmation turns.)
-        session = _session([(1000, 200, 0.25, False), (300, 50, 0.125, False), (40, 10, 0.0625, True)])
+        session = _session(
+            [(1000, 200, 0.25, False), (300, 50, 0.125, False), (40, 10, 0.0625, True)]
+        )
         assert session.session_tokens == 1600
         assert session.prompt_tokens == 1340
         assert session.completion_tokens == 260
@@ -472,8 +474,8 @@ class TestSessionValidation:
 
     def test_non_contiguous_turn_numbering_rejected(self) -> None:
         turns = (
-            TurnRecord(turn=1, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text="a"),
-            TurnRecord(turn=3, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text="b"),
+            TurnRecord(turn=1, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text=""),
+            TurnRecord(turn=3, prompt_tokens=1, completion_tokens=1, dollars=0.0, response_text=""),
         )
         with pytest.raises(ValueError, match="contiguously"):
             Session(task_id="t", dataset="d", arm="a", model="m", turns=turns, max_turns=8)
@@ -554,7 +556,8 @@ class _ScriptedLLM(LLMClient):
         return "stub"
 
     def complete(self, system: str, user: str, max_tokens: int = 1024) -> LLMResponse:
-        text, prompt_tokens, completion_tokens = self._script[min(self.calls, len(self._script) - 1)]
+        index = min(self.calls, len(self._script) - 1)
+        text, prompt_tokens, completion_tokens = self._script[index]
         self.calls += 1
         return LLMResponse(
             text=text,
@@ -579,8 +582,12 @@ class TestRunSessionConvergence:
         llm = _ScriptedLLM([("searching", 1500, 98), ("narrowing", 150, 53), ("DONE", 24, 10)])
         memory = _CountingMemory()
         session = run_session(
-            _task(), memory, llm, RunConfig(budget_tokens=250),
-            arm_name="brief_graph", is_resolved=_resolved_on("DONE"),
+            _task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=250),
+            arm_name="brief_graph",
+            is_resolved=_resolved_on("DONE"),
         )
         assert session.convergence_turn == 3
         assert session.resolved is True
@@ -591,8 +598,13 @@ class TestRunSessionConvergence:
     def test_unresolved_session_runs_to_the_turn_cap(self) -> None:
         llm = _ScriptedLLM([("still searching", 100, 20)])
         session = run_session(
-            _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
-            arm_name="none", is_resolved=_resolved_on("DONE"), max_turns=5,
+            _task(),
+            _CountingMemory(),
+            llm,
+            RunConfig(budget_tokens=250),
+            arm_name="none",
+            is_resolved=_resolved_on("DONE"),
+            max_turns=5,
         )
         assert session.n_turns == 5
         assert session.resolved is False
@@ -601,8 +613,12 @@ class TestRunSessionConvergence:
     def test_first_turn_resolution_is_a_one_turn_session(self) -> None:
         llm = _ScriptedLLM([("DONE at once", 400, 30)])
         session = run_session(
-            _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
-            arm_name="brief_graph", is_resolved=_resolved_on("DONE"),
+            _task(),
+            _CountingMemory(),
+            llm,
+            RunConfig(budget_tokens=250),
+            arm_name="brief_graph",
+            is_resolved=_resolved_on("DONE"),
         )
         assert session.n_turns == 1
         assert session.convergence_turn == 1
@@ -613,8 +629,13 @@ class TestRunSessionConvergence:
         memory = _CountingMemory()
         llm = _ScriptedLLM([("keep going", 100, 10)])
         run_session(
-            _task(), memory, llm, RunConfig(budget_tokens=250),
-            arm_name="brief_graph", is_resolved=_resolved_on("DONE"), max_turns=4,
+            _task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=250),
+            arm_name="brief_graph",
+            is_resolved=_resolved_on("DONE"),
+            max_turns=4,
         )
         assert memory.retrieve_calls == 1
         assert llm.calls == 4  # one completion per turn, no hidden retries
@@ -623,8 +644,12 @@ class TestRunSessionConvergence:
         memory = _CountingMemory()
         llm = _ScriptedLLM([("DONE", 100, 10)])
         session = run_session(
-            _task(), memory, llm, RunConfig(budget_tokens=10_000),
-            arm_name="brief_graph", is_resolved=_resolved_on("DONE"),
+            _task(),
+            memory,
+            llm,
+            RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph",
+            is_resolved=_resolved_on("DONE"),
         )
         assert session.retrieved_ids == ("D-1", "D-1-rationale", "D-2")
         assert session.governing_decisions == ("D-1",)
@@ -636,8 +661,12 @@ class TestRunSessionConvergence:
         # (1000*1 + 200*5)/1e6 + (500*1 + 100*5)/1e6 = 0.002 + 0.001 = 0.003.
         llm = _ScriptedLLM([("working", 1000, 200), ("DONE", 500, 100)])
         session = run_session(
-            _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
-            arm_name="bm25", is_resolved=_resolved_on("DONE"),
+            _task(),
+            _CountingMemory(),
+            llm,
+            RunConfig(budget_tokens=250),
+            arm_name="bm25",
+            is_resolved=_resolved_on("DONE"),
         )
         assert session.session_dollars == pytest.approx(0.003, abs=1e-15)
 
@@ -645,8 +674,13 @@ class TestRunSessionConvergence:
         llm = _ScriptedLLM([("x", 1, 1)])
         with pytest.raises(ValueError, match="max_turns"):
             run_session(
-                _task(), _CountingMemory(), llm, RunConfig(budget_tokens=250),
-                arm_name="none", is_resolved=_resolved_on("DONE"), max_turns=0,
+                _task(),
+                _CountingMemory(),
+                llm,
+                RunConfig(budget_tokens=250),
+                arm_name="none",
+                is_resolved=_resolved_on("DONE"),
+                max_turns=0,
             )
 
 
@@ -677,8 +711,12 @@ class TestDeterministicOfflineSessions:
         def run_once() -> Session:
             memory = _CountingMemory()
             return run_session(
-                _task(), memory, StubLLMClient(), RunConfig(budget_tokens=10_000),
-                arm_name="brief_graph", is_resolved=_honours_governing,
+                _task(),
+                memory,
+                StubLLMClient(),
+                RunConfig(budget_tokens=10_000),
+                arm_name="brief_graph",
+                is_resolved=_honours_governing,
             )
 
         first, second = run_once(), run_once()
@@ -692,12 +730,22 @@ class TestDeterministicOfflineSessions:
         # turn cap and stays unresolved (the multi-turn image of the
         # context-free floor, thm:irreducible).
         with_context = run_session(
-            _task(), _CountingMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
-            arm_name="brief_graph", is_resolved=_honours_governing, max_turns=6,
+            _task(),
+            _CountingMemory(),
+            StubLLMClient(),
+            RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph",
+            is_resolved=_honours_governing,
+            max_turns=6,
         )
         without_context = run_session(
-            _task(), _NoneMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
-            arm_name="none", is_resolved=_honours_governing, max_turns=6,
+            _task(),
+            _NoneMemory(),
+            StubLLMClient(),
+            RunConfig(budget_tokens=10_000),
+            arm_name="none",
+            is_resolved=_honours_governing,
+            max_turns=6,
         )
         assert with_context.convergence_turn == 1
         assert without_context.convergence_turn is None
@@ -708,23 +756,37 @@ class TestDeterministicOfflineSessions:
         # turn 1 but the contextless arm pays every turn — the paper's whole
         # economic argument, reproduced deterministically.
         with_context = run_session(
-            _task(), _CountingMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
-            arm_name="brief_graph", is_resolved=_honours_governing, max_turns=6,
+            _task(),
+            _CountingMemory(),
+            StubLLMClient(),
+            RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph",
+            is_resolved=_honours_governing,
+            max_turns=6,
         )
         without_context = run_session(
-            _task(), _NoneMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
-            arm_name="none", is_resolved=_honours_governing, max_turns=6,
+            _task(),
+            _NoneMemory(),
+            StubLLMClient(),
+            RunConfig(budget_tokens=10_000),
+            arm_name="none",
+            is_resolved=_honours_governing,
+            max_turns=6,
         )
         assert with_context.turns[0].prompt_tokens > without_context.turns[0].prompt_tokens
         assert with_context.session_tokens < without_context.session_tokens
-        assert matchup_winner(
-            with_context.session_tokens, without_context.session_tokens
-        ) == "brief"
+        assert (
+            matchup_winner(with_context.session_tokens, without_context.session_tokens) == "brief"
+        )
 
     def test_stub_sessions_price_through_the_pricing_table(self) -> None:
         session = run_session(
-            _task(), _CountingMemory(), StubLLMClient(), RunConfig(budget_tokens=10_000),
-            arm_name="brief_graph", is_resolved=_honours_governing,
+            _task(),
+            _CountingMemory(),
+            StubLLMClient(),
+            RunConfig(budget_tokens=10_000),
+            arm_name="brief_graph",
+            is_resolved=_honours_governing,
         )
         expected = sum(
             price_dollars("stub", t.prompt_tokens, t.completion_tokens) for t in session.turns
