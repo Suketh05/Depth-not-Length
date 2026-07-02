@@ -296,3 +296,92 @@ export function loadSyntheticCompliance(dataDir: string = resolveDataDir()): Syn
     return { arm, compliance: parseNumberCell(row[complianceIdx], `${path} ${arm}.compliance`) };
   });
 }
+
+/**
+ * One row of paper_depth_slope.csv (tab:slope). Two shapes share the file:
+ *   - per-arm compliance slope rows  (arm_or_group in {brief,bm25,...}, slope = comply(d3)-comply(d1))
+ *   - Brief-minus-best-similarity gap rows (arm_or_group = "brief_minus_best_similarity@d{1,2,3}")
+ * `slopeOrGap` is signed; the CSV writes an explicit `+`/`-` sign which Number() parses.
+ */
+export interface DepthSlopeRow {
+  readonly armOrGroup: string;
+  readonly slopeOrGap: number;
+  readonly note: string;
+}
+
+/** Load results/data/paper_depth_slope.csv (tab:slope). */
+export function loadDepthSlope(dataDir: string = resolveDataDir()): DepthSlopeRow[] {
+  const path = join(dataDir, "paper_depth_slope.csv");
+  const table = readCsvTable(path);
+  const keyIdx = columnIndex(table.header, "arm_or_group");
+  const valIdx = columnIndex(table.header, "slope_or_gap");
+  const noteIdx = columnIndex(table.header, "note");
+  return table.rows.map((row) => {
+    const armOrGroup = stringCell(row, keyIdx, `${path} arm_or_group`);
+    return {
+      armOrGroup,
+      slopeOrGap: parseNumberCell(row[valIdx], `${path} ${armOrGroup}.slope_or_gap`),
+      note: row[noteIdx] ?? "",
+    };
+  });
+}
+
+/** Look up a single depth-slope value by key, throwing if absent. */
+export function depthSlopeValue(rows: readonly DepthSlopeRow[], key: string): number {
+  const found = rows.find((r) => r.armOrGroup === key);
+  if (found === undefined) {
+    throw new Error(`depth-slope key "${key}" not found`);
+  }
+  return found.slopeOrGap;
+}
+
+// ---------------------------------------------------------------------------
+// Paper-table GOLDEN constants — transcribed VERBATIM from the golden pack /
+// the paper LaTeX; NEVER produced by running this code. These pin the checker
+// to published values so a silently edited CSV cannot self-certify.
+// ---------------------------------------------------------------------------
+
+/**
+ * PAPER_TAB_SLOPE — the per-depth synthetic compliance grid (Claude), paper
+ * tab:slope, transcribed verbatim (golden-pack B.4). The committed
+ * paper_depth_slope.csv stores only the derived slope/gap columns; this grid is
+ * the source those columns must reproduce, which is exactly the depth-slope
+ * arithmetic identity the checker enforces:
+ *   slope(arm) = comply(d3) - comply(d1)                          [per-arm rows]
+ *   gap(dk)    = comply(brief, dk) - max_{sim} comply(sim, dk)    [gap rows]
+ * `isSimilarity` marks the arms eligible for the best-similarity maximum (Brief
+ * is the typed store, excluded from its own comparison baseline).
+ */
+export interface SlopeDepthRow {
+  readonly arm: string;
+  readonly isSimilarity: boolean;
+  readonly d1: number;
+  readonly d2: number;
+  readonly d3: number;
+}
+
+export const PAPER_TAB_SLOPE: readonly SlopeDepthRow[] = [
+  { arm: "brief", isSimilarity: false, d1: 0.95, d2: 0.975, d3: 0.875 },
+  { arm: "bm25", isSimilarity: true, d1: 0.925, d2: 0.925, d3: 0.775 },
+  { arm: "tfidf", isSimilarity: true, d1: 0.925, d2: 0.925, d3: 0.8 },
+  { arm: "dense", isSimilarity: true, d1: 0.925, d2: 0.9, d3: 0.75 },
+  { arm: "hybrid_rrf", isSimilarity: true, d1: 0.925, d2: 0.95, d3: 0.775 },
+  { arm: "rerank_ce", isSimilarity: true, d1: 0.925, d2: 0.9, d3: 0.725 },
+];
+
+/**
+ * PAPER_KAPPA_GOLDEN — full-precision float64 kappa = compliance / recall for
+ * each published tab:realret arm, transcribed VERBATIM from golden-pack B.1.
+ * (The `none` arm is intentionally omitted — its kappa is unpublished.) Used to
+ * prove the CSV's recall/compliance columns reproduce these exact ratios, on
+ * top of the CSV-internal round-trip against its own published kappa column.
+ */
+export const PAPER_KAPPA_GOLDEN: Readonly<Record<string, number>> = {
+  brief: 0.7031484257871063,
+  dense: 0.6393700787401575,
+  hybrid_rrf: 0.6439024390243903,
+  tfidf: 0.6374172185430463,
+  bm25: 0.5695364238410596,
+  rerank_ce: 0.6072041166380789,
+  raptor: 0.5636998254799302,
+};
