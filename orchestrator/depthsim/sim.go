@@ -153,3 +153,33 @@ func trialSeed(baseSeed uint64, a Arm, depth, trial int) int64 {
 	h = splitMix64(h + uint64(trial))
 	return int64(h)
 }
+
+// Estimate is the pooled Monte-Carlo result for one (arm, depth): each trial is
+// a Bernoulli draw with success probability P_ret(d), so Successes ~ Binomial(
+// Trials, P_ret(d)).
+type Estimate struct {
+	Arm       Arm
+	Depth     int
+	Successes int
+	Trials    int
+}
+
+// PHat is the empirical retrieval probability, the unbiased estimator of
+// P_ret(d). Returns 0 when there are no trials.
+func (e Estimate) PHat() float64 {
+	if e.Trials == 0 {
+		return 0
+	}
+	return float64(e.Successes) / float64(e.Trials)
+}
+
+// StdErr is the binomial standard error sqrt(p_hat*(1-p_hat)/n) of PHat. A test
+// asserts the empirical estimate lands within a few of these of the analytic
+// value; the SE shrinks as 1/sqrt(n), which is why N=200k pins P_ret(d) tightly.
+func (e Estimate) StdErr() float64 {
+	if e.Trials == 0 {
+		return 0
+	}
+	p := e.PHat()
+	return math.Sqrt(p * (1 - p) / float64(e.Trials))
+}
