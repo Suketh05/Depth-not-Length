@@ -41,3 +41,18 @@ class TestClopperPearsonClosedForms:
         ci = clopper_pearson(10, 10, 0.01)
         assert ci.low == pytest.approx(0.005 ** (1.0 / 10), abs=1e-12)
         assert ci.high == 1.0
+
+
+class TestClopperPearsonPaperWorkedExample:
+    def test_chain_recovery_40_of_40_boundary_cell(self) -> None:
+        # Paper App. app:worked worked example (j): a typed store recovers the chain at
+        # every one of n = 40 paired queries (40/40), reported as the exact interval
+        # [0.912, 1.000]. This is the n/n saturation cell: upper = 1 exactly, and
+        # lower = (alpha/2)^(1/n) = 0.025^(1/40), which rounds to 0.912 at 3 dp.
+        ci = clopper_pearson(40, 40, 0.05)
+        assert ci.high == 1.0
+        # Paper-published 3-dp value (worked example (j)).
+        assert ci.low == pytest.approx(0.912, abs=1e-3)
+        # Exact closed form the paper value is a rounding of.
+        assert ci.low == pytest.approx(0.025 ** (1.0 / 40), abs=1e-12)
+        assert round(ci.low, 3) == 0.912
