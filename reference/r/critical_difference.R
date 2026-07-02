@@ -6,6 +6,19 @@
 # ranks and the Nemenyi critical difference, and asserts the structured arm ranks best
 # and the omnibus is significant -- agreeing with the Python implementation.
 # Run: Rscript reference/r/critical_difference.R
+#
+# This file ALSO carries a self-asserting base-R cross-check suite (appended
+# below) that re-derives the paper's statistical estimators independently and
+# asserts their canonical golden values via stopifnot(). It is CI-executed:
+# any golden mismatch exits non-zero. Base/stats only -- no CRAN packages.
+# Cross-check index (golden-pack section / paper anchor):
+#   (1) DerSimonian-Laird meta-analysis        -- C.2
+#   (2) Schuirmann TOST (two means, pt())      -- C.1
+#   (3) PAVA isotonic regression               -- C.3
+#   (4) Wilson score interval + Cohen's h      -- C.6 / C.7
+#   (5) kappa = compliance/recall identity     -- B.1 / tab:realret / eq:factor
+#   (6) theory gap g(2)                        -- A.3 / A.1 / prop:cross
+#   (7) edge cases (floors, saturation, empty)
 
 arms <- c("none", "dense", "hybrid", "brief_graph")
 scores <- rbind(
