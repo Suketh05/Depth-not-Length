@@ -119,6 +119,63 @@ public final class DecisionGraph {
         return addEdge(source, target, type, 1.0);
     }
 
+    /**
+     * Bounded, confidence-gated multi-hop reachability. Direct Java port of the
+     * recursive-CTE template in {@code schema/graph.sql} ({@code traverseEntityGraph}):
+     *
+     * <pre>
+     *   WITH RECURSIVE walk(node, depth) AS (
+     *       SELECT :start, 0
+     *     UNION
+     *       SELECT e.target, walk.depth + 1
+     *       FROM walk JOIN entity_link e ON e.source = walk.node
+     *       WHERE walk.depth &lt; :max_hops AND e.confidence &gt;= :min_confidence
+     *   )
+     *   SELECT DISTINCT node, depth FROM walk;
+     * </pre>
+     *
+     * The {@code UNION} (set semantics) makes each node appear once at its
+     * shortest gated depth; edges below {@code minConfidence} are not followed,
+     * exactly as the paper's 3-hop typed traversal drops low-fidelity links.
+     *
+     * @return map of reachable node id -&gt; shortest hop-depth from {@code start}
+     *     (the start itself is always present at depth 0).
+     */
+    public Map<String, Integer> traverse(String start, int maxHops, double minConfidence) {
+        if (!nodes.containsKey(start)) {
+            throw new IllegalArgumentException("unknown start node: " + start);
+        }
+        if (maxHops < 0) {
+            throw new IllegalArgumentException("maxHops must be >= 0: " + maxHops);
+        }
+        // Adjacency filtered by the confidence gate, source -> targets.
+        Map<String, List<String>> adj = new HashMap<>();
+        for (Edge e : edges) {
+            if (e.confidence >= minConfidence) {
+                adj.computeIfAbsent(e.source, k -> new ArrayList<>()).add(e.target);
+            }
+        }
+        // BFS realises the CTE's shortest-depth set semantics deterministically.
+        Map<String, Integer> depth = new LinkedHashMap<>();
+        depth.put(start, 0);
+        Deque<String> frontier = new ArrayDeque<>();
+        frontier.add(start);
+        while (!frontier.isEmpty()) {
+            String cur = frontier.removeFirst();
+            int d = depth.get(cur);
+            if (d >= maxHops) {
+                continue;
+            }
+            for (String next : adj.getOrDefault(cur, Collections.emptyList())) {
+                if (!depth.containsKey(next)) {
+                    depth.put(next, d + 1);
+                    frontier.addLast(next);
+                }
+            }
+        }
+        return depth;
+    }
+
     public Node node(String id) {
         return nodes.get(id);
     }
