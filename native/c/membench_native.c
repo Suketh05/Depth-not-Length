@@ -119,3 +119,53 @@ int mb_crossover_search(double s0, double rho, double q, double tau, int max_d) 
   }
   return 0;
 }
+
+/*
+ * Wilson score interval. Shared center/margin, then the requested clamped bound.
+ * `p_hat` is clamped to [0, 1] first (fractional pooled counts can round a hair
+ * outside), matching wilson_interval. Operation order mirrors the Python:
+ *   denom  = 1 + z^2/n
+ *   center = (p + z^2/2n) / denom
+ *   margin = z*sqrt(p(1-p)/n + z^2/4n^2) / denom
+ */
+static double mb_clamp01(double x) {
+  if (x < 0.0) {
+    return 0.0;
+  }
+  if (x > 1.0) {
+    return 1.0;
+  }
+  return x;
+}
+
+static void mb_wilson(double successes, double n, double z, double *low,
+                      double *high) {
+  const double p_hat = mb_clamp01(successes / n);
+  const double z2 = z * z;
+  const double denom = 1.0 + z2 / n;
+  const double center = (p_hat + z2 / (2.0 * n)) / denom;
+  const double margin =
+      z * sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n)) / denom;
+  *low = center - margin;
+  if (*low < 0.0) {
+    *low = 0.0;
+  }
+  *high = center + margin;
+  if (*high > 1.0) {
+    *high = 1.0;
+  }
+}
+
+/* Lower Wilson bound max(0, center-margin). Paper: Wilson (1927), kappa CI. */
+double mb_wilson_low(double successes, double n, double z) {
+  double low, high;
+  mb_wilson(successes, n, z, &low, &high);
+  return low;
+}
+
+/* Upper Wilson bound min(1, center+margin). Paper: Wilson (1927), kappa CI. */
+double mb_wilson_high(double successes, double n, double z) {
+  double low, high;
+  mb_wilson(successes, n, z, &low, &high);
+  return high;
+}
