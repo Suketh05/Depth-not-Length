@@ -864,4 +864,59 @@ mod tests {
         assert!(wilson_interval_impl(-1.0, 10.0, 0.95).is_err());
         assert!(wilson_interval_impl(1.0, 10.0, 1.5).is_err());
     }
+
+    // ---- Hardening: edge cases (saturation, chance floor, degeneracy) ----
+
+    // q = 1 removes structured decay, so g(d) = 1 - P_sim(d) is monotone increasing
+    // and the win is a half-line: the region runs to the scan edge (crossover.py note
+    // that Prop 2's monotonicity holds only in the q = 1 limit). max_depth is kept
+    // shallow so P_sim does not underflow to 0 (which would flat-top the curve).
+    #[test]
+    fn crossover_q_one_is_monotone_half_line() {
+        let o = crossover_search_impl(0.70, 0.67, 1.0, 0.6, 8).unwrap();
+        assert!(o.exists);
+        // g is strictly increasing over 1..=8, so it is non-decreasing and the win
+        // region runs to the deepest scanned depth (the half-line, clipped to edge).
+        for w in o.g_curve.windows(2) {
+            assert!(w[1] >= w[0], "g must be non-decreasing at q=1");
+        }
+        assert_eq!(o.peak_depth, 8);
+        assert_eq!(o.win_hi, 8);
+    }
+
+    // Wilson bounds clamp into [0, 1]: 0 successes floors low at 0.0; all successes
+    // ceilings high at 1.0 (golden_pack.md C.6 clamp behaviour).
+    #[test]
+    fn wilson_interval_clamps_at_bounds() {
+        let (low, _) = wilson_interval_impl(0.0, 10.0, 0.95).unwrap();
+        assert_eq!(low, 0.0);
+        let (_, high) = wilson_interval_impl(10.0, 10.0, 0.95).unwrap();
+        assert_eq!(high, 1.0);
+    }
+
+    // BM25+ degeneracies: an all-empty corpus (avgdl = 0) scores zeros, and a query
+    // term absent from every document (df = 0) contributes nothing.
+    #[test]
+    fn bm25_plus_degenerate_and_oov() {
+        let empty =
+            bm25_plus_scores_impl(&[toks(&[]), toks(&[])], &toks(&["beta"]), 1.5, 0.75, 1.0);
+        assert_eq!(empty, vec![0.0, 0.0]);
+
+        let corpus = vec![toks(&["alpha", "beta"]), toks(&["gamma"])];
+        let oov = bm25_plus_scores_impl(&corpus, &toks(&["zeta"]), 1.5, 0.75, 1.0);
+        assert_eq!(oov, vec![0.0, 0.0]);
+    }
+
+    // The probit stays accurate deep in the tail (e.g. the 99.95% quantile), so the
+    // Wilson z is right at high confidence too.
+    #[test]
+    fn probit_is_accurate_in_the_tail() {
+        // Phi(3.290526731491958) = 0.9995 (standard-normal table value).
+        let z = probit(0.9995).unwrap();
+        assert!((z - 3.2905267314919255).abs() <= 1e-10, "z={z}");
+        // Round-trip: Phi(probit(p)) == p.
+        for p in [0.6, 0.8, 0.95, 0.99, 0.999] {
+            assert!((normal_cdf(probit(p).unwrap()) - p).abs() <= 1e-12);
+        }
+    }
 }
